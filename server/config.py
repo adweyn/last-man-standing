@@ -108,3 +108,21 @@ BOSS_AFK_STILL_SECONDS = BOSS_IDLE_SECONDS
 # Prize / rake logic
 # ---------------------------------------------------------------------------
 PRIZE_RAKE: float = 0.10  # 10% host fee rake
+
+# ---------------------------------------------------------------------------
+# Crystals and Quests Play-to-Earn Config
+# ---------------------------------------------------------------------------
+CRYSTAL_SPAWN_INTERVAL: float = 30.0   # Attempt to spawn a crystal every 30s
+CRYSTAL_MAX_PER_TIER: int = 8          # Maximum concurrent crystals in arena
+CRYSTAL_MIN_VALUE: float = 0.10        # Minimum mock $ value of a crystal
+CRYSTAL_MAX_VALUE: float = 0.50        # Maximum mock $ value of a crystal
+CRYSTAL_SPAWN_RADIUS: int = 15        # Radius of a crystal for drawing/collisions
+
+QUEST_EXPLORER_TARGET: float = 3000.0  # Pixels of distance needed
+QUEST_EXPLORER_REWARD: float = 0.30    # Reward in mock $
+
+QUEST_SURVIVOR_TARGET: float = 120.0   # Seconds of survival needed
+QUEST_SURVIVOR_REWARD: float = 0.40    # Reward in mock $
+
+QUEST_SCAVENGER_TARGET: float = 5.0    # Number of crystals collected needed
+QUEST_SCAVENGER_REWARD: float = 0.50   # Reward in mock $
