@@ -544,7 +544,20 @@ async def get_daily_quests(player_id: int) -> list[dict]:
     async with aiosqlite.connect(DATABASE_URL) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM player_quests WHERE player_id=? AND date=?", (player_id, today)
+            """SELECT *,
+                      CASE
+                          WHEN progress >= target AND is_claimed = 0 THEN 1
+                          ELSE 0
+                      END AS claimable
+               FROM player_quests
+               WHERE player_id=? AND date=?
+               ORDER BY CASE quest_type
+                   WHEN 'explorer' THEN 1
+                   WHEN 'survivor' THEN 2
+                   WHEN 'scavenger' THEN 3
+                   ELSE 9
+               END""",
+            (player_id, today)
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]

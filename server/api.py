@@ -485,7 +485,7 @@ async def claim_quest(form: ClaimQuestSchema, player: dict = Depends(get_current
     # Fetch updated profile for new balance
     refreshed = await database.get_player_by_id(player["id"])
     return {
-        "message": f"Successfully claimed reward of ${reward:.2f}!",
+        "message": f"Successfully claimed reward of {reward:.2f} CR.",
         "reward": reward,
         "new_balance": round(refreshed["balance"], 2)
     }

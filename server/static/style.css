@@ -152,6 +152,24 @@ header {
     letter-spacing: 1px;
 }
 
+.onboarding-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-bottom: 18px;
+}
+
+.onboarding-strip span {
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 6px;
+    padding: 7px 5px;
+    color: var(--text-gray);
+    font-size: 0.58rem;
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.2;
+}
+
 /* ─── Forms ─── */
 .form-group {
     margin-bottom: 18px;
@@ -291,6 +309,78 @@ header {
     border-color: #fff;
 }
 
+.run-panel {
+    display: grid;
+    grid-template-columns: 1fr 82px;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid rgba(255,255,255,0.32);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,204,68,0.04));
+}
+
+.start-run-panel {
+    display: grid;
+    grid-template-columns: 1fr 118px;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid rgba(255,255,255,0.34);
+    border-radius: 8px;
+    padding: 12px;
+    margin: -6px 0 16px;
+    background: rgba(255,255,255,0.06);
+}
+
+.start-run-panel strong,
+.start-run-panel small {
+    display: block;
+}
+
+.start-run-panel strong {
+    margin-top: 2px;
+    font-size: 0.9rem;
+}
+
+.start-run-panel small {
+    margin-top: 4px;
+    color: var(--text-gray);
+    font-size: 0.64rem;
+    line-height: 1.25;
+}
+
+.btn.disabled,
+.btn:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
+.run-panel strong,
+.run-panel small,
+.run-kicker {
+    display: block;
+}
+
+.run-kicker {
+    color: var(--green-neon);
+    font-size: 0.62rem;
+    font-weight: 900;
+    letter-spacing: 1.4px;
+}
+
+.run-panel strong {
+    margin-top: 2px;
+    font-size: 0.95rem;
+}
+
+.run-panel small {
+    margin-top: 4px;
+    color: var(--text-gray);
+    font-size: 0.66rem;
+    line-height: 1.25;
+}
+
 .shop-panel {
     border: 1px solid var(--border-gray);
     border-radius: 8px;
@@ -367,6 +457,11 @@ header {
     background: rgba(12, 12, 12, 0.58);
 }
 
+.info-panel:first-child {
+    border-color: rgba(255,255,255,0.3);
+    background: rgba(30, 30, 30, 0.52);
+}
+
 .mini-list {
     display: flex;
     flex-direction: column;
@@ -412,6 +507,10 @@ header {
     color: #000;
 }
 
+.mini-action:disabled {
+    opacity: 0.45;
+}
+
 .tier-cards {
     display: flex;
     flex-direction: column;
@@ -433,10 +532,39 @@ header {
     background: rgba(40, 40, 40, 0.6);
 }
 
+.tier-card.selected {
+    border-color: #fff;
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 3px 0 0 #fff;
+}
+
 .tier-card h3 {
     font-family: var(--font-header);
     font-size: 1.1rem;
     font-weight: 700;
+}
+
+.tier-tag {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 5px;
+    color: var(--text-gray);
+    font-family: var(--font-body);
+    font-size: 0.52rem;
+    letter-spacing: 0;
+}
+
+.tier-tag.hot {
+    color: var(--green-neon);
+    border-color: rgba(0,204,68,0.45);
+}
+
+.tier-tag.danger {
+    color: var(--red-neon);
+    border-color: rgba(204,0,0,0.55);
 }
 
 .tier-card .desc {
@@ -538,6 +666,22 @@ header {
 
 .objective-tip span {
     font-size: 0.54rem;
+}
+
+.quest-tracker {
+    top: 184px;
+    left: 15px;
+    max-width: 172px;
+    gap: 4px;
+    opacity: 0.86;
+}
+
+.quest-tracker span {
+    font-size: 0.58rem;
+}
+
+#hud-quest-line {
+    color: var(--yellow-neon);
 }
 
 #hud-top-left #hud-tier {
@@ -823,8 +967,59 @@ header {
         grid-template-columns: 1fr;
     }
 
+    .start-run-panel {
+        grid-template-columns: 1fr;
+    }
+
     .shop-buy {
         width: 100%;
+    }
+
+    body.in-game .container {
+        padding: 0;
+    }
+
+    #hud-top-left,
+    #hud-top-right,
+    .objective-tip,
+    .quest-tracker,
+    #hud-bottom-right {
+        font-size: 0.66rem;
+        padding: 7px 9px;
+    }
+
+    .objective-tip {
+        top: 92px;
+        max-width: 138px;
+    }
+
+    .quest-tracker {
+        top: 164px;
+        max-width: 148px;
+    }
+
+    #hud-bottom-right {
+        min-width: 126px;
+        right: 10px;
+        bottom: 10px;
+    }
+
+    #game-chat-container {
+        width: min(210px, calc(100vw - 170px));
+        left: 10px;
+        bottom: 10px;
+        max-height: 138px;
+    }
+
+    #joystick-container {
+        width: 124px;
+        height: 124px;
+        bottom: max(18px, env(safe-area-inset-bottom));
+    }
+
+    #joystick-handle {
+        width: 46px;
+        height: 46px;
     }
 }
 

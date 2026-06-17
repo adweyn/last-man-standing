@@ -30,7 +30,10 @@ let authToken = localStorage.getItem('lms_token') || null;
 let username = localStorage.getItem('lms_username') || null;
 let userProfile = null;
 let tierStatsInterval = null;
+let questRefreshInterval = null;
 let activeTier = null;
+let questCache = [];
+let selectedTier = 1;
 
 // WebSocket Client
 let wsConn = null;
@@ -81,10 +84,16 @@ const btnDeposit = document.getElementById('btn-deposit');
 const btnLogout = document.getElementById('btn-logout');
 const btnExitGame = document.getElementById('btn-exit-game');
 const btnQuests = document.getElementById('btn-quests');
+const btnFocusShop = document.getElementById('btn-focus-shop');
+const btnStartRun = document.getElementById('btn-start-run');
 
 const balanceValue = document.getElementById('balance-value');
 const premiumValue = document.getElementById('premium-value');
 const ticketsValue = document.getElementById('tickets-value');
+const runRecommendation = document.getElementById('run-recommendation');
+const runStatus = document.getElementById('run-status');
+const selectedTierLabel = document.getElementById('selected-tier-label');
+const selectedTierHint = document.getElementById('selected-tier-hint');
 const shopProducts = document.getElementById('shop-products');
 const questList = document.getElementById('quest-list');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -108,6 +117,8 @@ const hudTier = document.getElementById('hud-tier');
 const hudPrize = document.getElementById('hud-prize');
 const hudAlive = document.getElementById('hud-alive');
 const hudMovesLabel = document.getElementById('hud-moves-label');
+const hudNearestDetail = document.getElementById('hud-nearest-detail');
+const hudQuestLine = document.getElementById('hud-quest-line');
 const dot1 = document.getElementById('dot-1');
 const dot2 = document.getElementById('dot-2');
 
@@ -243,6 +254,7 @@ btnLogout.addEventListener('click', () => {
     localStorage.removeItem('lms_token');
     localStorage.removeItem('lms_username');
     clearInterval(tierStatsInterval);
+    clearInterval(questRefreshInterval);
     showAuthScreen();
 });
 
@@ -258,16 +270,20 @@ async function showLobbyScreen() {
     await fetchQuests();
     await fetchLeaderboard();
     clearInterval(tierStatsInterval);
+    clearInterval(questRefreshInterval);
     tierStatsInterval = setInterval(() => {
         fetchLobbyData();
         fetchLeaderboard();
     }, 4000);
+    questRefreshInterval = setInterval(fetchQuests, 10000);
 
-    // Click cards to join
+    updateSelectedTierUI();
+
+    // Tap cards to select a world, then use the primary Start Run button.
     document.querySelectorAll('.tier-card').forEach(card => {
         card.onclick = () => {
             const tier = parseInt(card.getAttribute('data-tier'));
-            joinTierTournament(tier);
+            selectTier(tier);
         };
     });
 }
@@ -290,6 +306,8 @@ async function fetchLobbyData() {
             ticketsValue.textContent = `${userProfile.chaos_tickets || 0} CHAOS`;
             premiumValue.textContent = userProfile.is_premium ? 'PREMIUM' : 'STANDARD';
             premiumValue.className = userProfile.is_premium ? 'premium-pill active' : 'premium-pill';
+            updateRunRecommendation();
+            updateSelectedTierUI();
             await fetchShopProducts();
         }
 
@@ -309,6 +327,36 @@ async function fetchLobbyData() {
         }
     } catch (e) {
         console.error('Error fetching lobby states', e);
+    }
+}
+
+function selectTier(tier) {
+    selectedTier = Math.max(1, Math.min(3, Number(tier) || 1));
+    updateSelectedTierUI();
+}
+
+function updateSelectedTierUI() {
+    const tierMeta = {
+        1: { roman: 'I', fee: 1, hint: 'Low risk entry. Good for first runs and quest farming.' },
+        2: { roman: 'II', fee: 5, hint: 'More pressure, better prize pool, fewer forgiving moments.' },
+        3: { roman: 'III', fee: 10, hint: 'No mercy mode. Highest prize pool, highest threat.' }
+    };
+    const meta = tierMeta[selectedTier] || tierMeta[1];
+    document.querySelectorAll('.tier-card').forEach(card => {
+        const tier = Number(card.getAttribute('data-tier'));
+        card.classList.toggle('selected', tier === selectedTier);
+    });
+    if (selectedTierLabel) selectedTierLabel.textContent = `Tier ${meta.roman} - ${meta.fee} CR`;
+    if (selectedTierHint) selectedTierHint.textContent = meta.hint;
+
+    if (!btnStartRun) return;
+    const balance = Number(userProfile?.balance || 0);
+    const hasActive = Boolean(userProfile?.active_session);
+    btnStartRun.textContent = hasActive ? `CONTINUE TIER ${userProfile.active_session.tier_id}` : `START TIER ${meta.roman}`;
+    btnStartRun.disabled = !hasActive && balance < meta.fee;
+    btnStartRun.classList.toggle('disabled', btnStartRun.disabled);
+    if (!hasActive && balance < meta.fee && selectedTierHint) {
+        selectedTierHint.textContent = `Need ${Math.max(0, meta.fee - balance).toFixed(2)} more CR to enter this world.`;
     }
 }
 
@@ -339,6 +387,29 @@ async function fetchShopProducts() {
         });
     } catch (e) {
         console.error('Error fetching shop products', e);
+    }
+}
+
+function updateRunRecommendation() {
+    if (!userProfile || !runRecommendation || !runStatus) return;
+    const balance = Number(userProfile.balance || 0);
+    if (userProfile.active_session) {
+        runRecommendation.textContent = `Continue Tier ${userProfile.active_session.tier_id}`;
+        runStatus.textContent = 'You have an active survivor. Re-enter before the Boss wakes.';
+        return;
+    }
+    if (balance >= 10) {
+        runRecommendation.textContent = 'Tier III is open';
+        runStatus.textContent = 'High threat, highest CR pool. One mistake ends the run.';
+    } else if (balance >= 5) {
+        runRecommendation.textContent = 'Tier II is ready';
+        runStatus.textContent = 'Balanced risk. Complete map goals to refill credits.';
+    } else if (balance >= 1) {
+        runRecommendation.textContent = 'Tier I is ready';
+        runStatus.textContent = 'Start cheap, collect CR, claim quests, climb the board.';
+    } else {
+        runRecommendation.textContent = 'Refill credits';
+        runStatus.textContent = 'Complete quests or buy CR with Stars to enter a run.';
     }
 }
 
@@ -379,15 +450,23 @@ async function buyShopProduct(productId) {
 async function fetchQuests() {
     if (!authToken || !questList) return;
     try {
+        if (!questList.children.length) {
+            questList.innerHTML = '<div class="mini-row"><div><strong>Loading quests</strong><small>Syncing daily objectives...</small></div><span>...</span></div>';
+        }
         const resp = await fetch(`${SERVER_API_URL}/quests`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         });
-        if (!resp.ok) return;
+        if (!resp.ok) {
+            questList.innerHTML = '<div class="mini-row"><div><strong>Quests unavailable</strong><small>Try refresh in a moment.</small></div><span>!</span></div>';
+            return;
+        }
         const quests = await resp.json();
+        questCache = quests;
         questList.innerHTML = '';
         quests.forEach(q => {
             const done = Number(q.progress) >= Number(q.target);
-            const claimed = Boolean(q.is_claimed);
+            const claimed = isQuestClaimed(q);
+            const claimable = q.claimable === true || q.claimable === 1 || q.claimable === '1' || (done && !claimed);
             const pct = Math.min(100, Math.round((Number(q.progress) / Number(q.target)) * 100));
             const row = document.createElement('div');
             row.className = 'mini-row';
@@ -396,15 +475,17 @@ async function fetchQuests() {
                     <strong>${formatQuestName(q.quest_type)}</strong>
                     <small>${pct}% | ${Number(q.progress).toFixed(0)} / ${Number(q.target).toFixed(0)} | +${Number(q.reward).toFixed(2)} CR</small>
                 </div>
-                <button class="mini-action ${done && !claimed ? 'ready' : ''}" data-quest="${escapeHTML(q.quest_type)}">${claimed ? 'DONE' : done ? 'CLAIM' : 'RUN'}</button>
+                <button class="mini-action ${claimable ? 'ready' : ''}" data-quest="${escapeHTML(q.quest_type)}" ${claimable ? '' : 'disabled'}>${claimed ? 'DONE' : claimable ? 'CLAIM' : 'RUN'}</button>
             `;
             questList.appendChild(row);
         });
         questList.querySelectorAll('.mini-action.ready').forEach(btn => {
             btn.addEventListener('click', () => claimQuest(btn.getAttribute('data-quest')));
         });
+        updateQuestHUD();
     } catch (e) {
         console.error('Error fetching quests', e);
+        questList.innerHTML = '<div class="mini-row"><div><strong>Quest sync failed</strong><small>Network or auth issue.</small></div><span>!</span></div>';
     }
 }
 
@@ -468,24 +549,42 @@ if (btnQuests) {
     });
 }
 
-btnDeposit.addEventListener('click', async () => {
-    try {
-        const resp = await fetch(`${SERVER_API_URL}/deposit`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ amount: 10.00 })
-        });
-        if (resp.ok) {
-            await fetchLobbyData();
-            showToast('+10 CR deposited', 'success');
+if (btnFocusShop) {
+    btnFocusShop.addEventListener('click', () => {
+        document.getElementById('shop-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+}
+
+if (btnStartRun) {
+    btnStartRun.addEventListener('click', () => {
+        if (userProfile?.active_session) {
+            joinTierTournament(Number(userProfile.active_session.tier_id));
+            return;
         }
-    } catch (e) {
-        showToast('Connection failed', 'error');
-    }
-});
+        joinTierTournament(selectedTier);
+    });
+}
+
+if (btnDeposit) {
+    btnDeposit.addEventListener('click', async () => {
+        try {
+            const resp = await fetch(`${SERVER_API_URL}/deposit`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ amount: 10.00 })
+            });
+            if (resp.ok) {
+                await fetchLobbyData();
+                showToast('+10 CR deposited', 'success');
+            }
+        } catch (e) {
+            showToast('Connection failed', 'error');
+        }
+    });
+}
 
 
 // ─── TOURNAMENT JOINING & WEBSOCKETS ───
@@ -503,12 +602,16 @@ async function joinTierTournament(tier) {
         const data = await resp.json();
         if (!resp.ok) {
             showToast(data.detail || 'Could not join tier', 'error');
+            if ((data.detail || '').toLowerCase().includes('insufficient')) {
+                document.getElementById('shop-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
             return;
         }
 
         activeTier = tier;
         showToast(`Entered Tier ${tier} Lobby`, 'success');
         clearInterval(tierStatsInterval);
+        clearInterval(questRefreshInterval);
         startWebGame(tier);
 
     } catch (e) {
@@ -638,12 +741,20 @@ function connectWebSocket() {
         }
         else if (mtype === 'crystal_collected') {
             addChatBubble('System', `${data.username} collected ${Number(data.value).toFixed(2)} CR`);
+            if (data.player_id === selfPlayerId) {
+                fetchQuests();
+                fetchLobbyData();
+            }
         }
         else if (mtype === 'objective_list') {
             mapObjectives = data.objectives || [];
         }
         else if (mtype === 'objective_completed') {
             addChatBubble('System', `${data.username} completed ${formatObjectiveType(data.objective_type)} +${Number(data.reward).toFixed(2)} CR`);
+            if (data.player_id === selfPlayerId) {
+                fetchQuests();
+                fetchLobbyData();
+            }
         }
         else if (mtype === 'player_eliminated') {
             addChatBubble('System', `${data.username} eliminated: ${formatDeathReason(data.reason)}`);
@@ -866,13 +977,14 @@ function update(dt) {
             selfX = Math.max(15, Math.min(selfX, WORLD_WIDTH - 15));
             selfY = Math.max(15, Math.min(selfY, WORLD_HEIGHT - 15));
 
-            // Colllision checks
+            // Collision checks
             for (let obs of obstacleList) {
                 const dist = Math.hypot(selfX - obs.x, selfY - obs.y);
                 if (dist < obs.rad + PLAYER_RADIUS) {
                     const overlap = (obs.rad + PLAYER_RADIUS) - dist;
-                    const pushX = ((selfX - obs.x) / dist) * overlap;
-                    const pushY = ((selfY - obs.y) / dist) * overlap;
+                    const safeDist = dist || 1;
+                    const pushX = ((selfX - obs.x) / safeDist) * overlap;
+                    const pushY = ((selfY - obs.y) / safeDist) * overlap;
                     selfX += pushX;
                     selfY += pushY;
                 }
@@ -939,6 +1051,8 @@ function update(dt) {
     if (userProfile) {
         updateDailyMovesHUD();
     }
+    updateNearestGoalHUD();
+    updateQuestHUD();
 }
 
 function draw() {
@@ -966,22 +1080,25 @@ function draw() {
     // 3. Draw district zones
     drawDistrictZones(offsetX, offsetY);
 
-    // 4. Draw map props
+    // 4. Draw world routes
+    drawWorldRoutes(offsetX, offsetY);
+
+    // 5. Draw map props
     for (let obs of obstacleList) {
         drawMapProp(obs, offsetX, offsetY);
     }
 
-    // 5. Draw Particles
+    // 6. Draw Particles
     drawParticles(offsetX, offsetY);
 
-    // 6. Draw map quest objects
+    // 7. Draw map quest objects
     drawCrystals(offsetX, offsetY);
     drawMapObjectives(offsetX, offsetY);
 
-    // 7. Draw temporary hazard zones
+    // 8. Draw temporary hazard zones
     drawHazards(offsetX, offsetY);
 
-    // 8. Draw Other Players
+    // 9. Draw Other Players
     playersMap.forEach(p => {
         if (p.is_alive) {
             drawCyberAvatar(p.x + offsetX, p.y + offsetY, COLORS.GRAY, false, p.username);
@@ -990,7 +1107,7 @@ function draw() {
         }
     });
 
-    // 9. Draw Self
+    // 10. Draw Self
     const selfAlive = deathOverlay.classList.contains('hidden');
     if (selfAlive) {
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
@@ -998,12 +1115,17 @@ function draw() {
         drawTombstone(selfX + offsetX, selfY + offsetY);
     }
 
-    // 10. Draw Boss AI Void Creature
+    // 11. Draw current objective direction
+    if (selfAlive) {
+        drawGoalPointer(offsetX, offsetY);
+    }
+
+    // 12. Draw Boss AI Void Creature
     if (bossState.state !== 'sleeping') {
         drawBoss(bossState.x + offsetX, bossState.y + offsetY);
     }
 
-    // 11. Draw Minimap Overlay
+    // 13. Draw Minimap Overlay
     drawMinimap();
 }
 
@@ -1037,6 +1159,21 @@ function drawGrid(ox, oy) {
             ctx.fillRect(x + ox - 1, y + oy - 1, 2, 2);
         }
     }
+}
+
+function drawRoundRect(x, y, w, h, r) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
 }
 
 function drawDistrictZones(ox, oy) {
@@ -1081,6 +1218,55 @@ function drawDistrictZones(ox, oy) {
         ctx.textAlign = 'left';
         ctx.fillText(zone.label, x + 14, y + 22);
     });
+}
+
+function drawWorldRoutes(ox, oy) {
+    if (!districtZones.length) return;
+    const t = Date.now() / 1000;
+    const hubs = districtZones.map(zone => ({
+        x: zone.x + zone.w / 2,
+        y: zone.y + zone.h / 2,
+        label: zone.label
+    }));
+    const center = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, label: 'SPAWN' };
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    hubs.forEach((hub, idx) => {
+        const pulse = (Math.sin(t * 2 + idx) + 1) / 2;
+        ctx.strokeStyle = `rgba(255,255,255,${0.08 + pulse * 0.06})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([18, 18]);
+        ctx.lineDashOffset = -t * 18;
+        ctx.beginPath();
+        ctx.moveTo(center.x + ox, center.y + oy);
+        const midX = (center.x + hub.x) / 2 + Math.sin(idx * 1.7) * 90;
+        const midY = (center.y + hub.y) / 2 + Math.cos(idx * 1.3) * 90;
+        ctx.quadraticCurveTo(midX + ox, midY + oy, hub.x + ox, hub.y + oy);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(hub.x + ox, hub.y + oy, 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fill();
+    });
+    ctx.setLineDash([]);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(center.x + ox, center.y + oy, 44 + Math.sin(t * 3) * 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.font = '900 10px Inter';
+    ctx.textAlign = 'center';
+    ctx.fillText('SPAWN', center.x + ox, center.y + oy - 54);
+    ctx.restore();
 }
 
 function drawMapProp(obs, ox, oy) {
@@ -1388,6 +1574,68 @@ function drawMapObjectives(ox, oy) {
     });
 }
 
+function drawGoalPointer(ox, oy) {
+    const goal = getNearestGoal();
+    if (!goal) return;
+
+    const sx = selfX + ox;
+    const sy = selfY + oy;
+    const gx = goal.x + ox;
+    const gy = goal.y + oy;
+    const dx = gx - sx;
+    const dy = gy - sy;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 80) return;
+
+    const angle = Math.atan2(dy, dx);
+    const pointerDist = Math.min(74, Math.max(44, dist * 0.08));
+    const px = sx + Math.cos(angle) * pointerDist;
+    const py = sy + Math.sin(angle) * pointerDist;
+    const t = Date.now() / 1000;
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-pointerDist + 18, 0);
+    ctx.lineTo(-8, 0);
+    ctx.stroke();
+
+    ctx.fillStyle = goal.kind === 'crystal' ? COLORS.YELLOW : '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.86 + Math.sin(t * 5) * 0.12;
+    ctx.beginPath();
+    ctx.moveTo(13, 0);
+    ctx.lineTo(-8, -8);
+    ctx.lineTo(-4, 0);
+    ctx.lineTo(-8, 8);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.font = '800 9px Inter';
+    ctx.textAlign = 'center';
+    const label = `${goal.shortLabel} ${Math.round(dist)}m`;
+    const labelWidth = Math.min(132, ctx.measureText(label).width + 14);
+    const lx = Math.max(labelWidth / 2 + 8, Math.min(canvas.width - labelWidth / 2 - 8, px));
+    const ly = Math.max(24, Math.min(canvas.height - 22, py - 18));
+    drawRoundRect(lx - labelWidth / 2, ly - 9, labelWidth, 18, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, lx, ly + 3);
+    ctx.restore();
+}
+
 function drawHazards(ox, oy) {
     const t = Date.now() / 1000;
     hazardZones.forEach(h => {
@@ -1557,7 +1805,7 @@ function updateBossHUD() {
         subtitle.textContent = 'PREPARE TO RUN OR HIDE IMMEDIATELY';
         banner.classList.remove('hidden');
     } else if (bossState.state === 'hunting') {
-        title.textContent = '⚠️ WARNING: BOSS ACTIVE & HUNTING!';
+        title.textContent = 'WARNING: BOSS ACTIVE & HUNTING!';
         title.style.color = '#fff';
         const diff = bossState.difficulty ? ` | THREAT ${bossState.difficulty}` : '';
         subtitle.textContent = bossState.target_username ? `CURRENT TARGET: ${bossState.target_username.toUpperCase()}${diff}` : `SEEKING VICTIMS${diff}`;
@@ -1574,6 +1822,67 @@ function updateDailyMovesHUD() {
 
     hudMovesLabel.textContent = `${Math.min(count, 2)}/2 moves done`;
     hudMovesLabel.className = count >= 2 ? '' : 'warning';
+}
+
+function updateQuestHUD() {
+    if (!hudQuestLine) return;
+    if (!questCache.length) {
+        hudQuestLine.textContent = 'Syncing...';
+        return;
+    }
+    const active = questCache.find(q => !isQuestClaimed(q) && Number(q.progress) < Number(q.target))
+        || questCache.find(q => !isQuestClaimed(q))
+        || questCache[0];
+    if (!active) {
+        hudQuestLine.textContent = 'All claimed';
+        return;
+    }
+    const pct = Math.min(100, Math.round((Number(active.progress) / Number(active.target)) * 100));
+    hudQuestLine.textContent = `${formatQuestName(active.quest_type)} ${pct}%`;
+}
+
+function updateNearestGoalHUD() {
+    if (!hudNearestDetail) return;
+    const nearest = getNearestGoal();
+    if (!nearest) {
+        hudNearestDetail.textContent = 'No signal';
+        return;
+    }
+    hudNearestDetail.textContent = `${nearest.label} ${Math.round(nearest.dist)}m`;
+}
+
+function getNearestGoal() {
+    const goals = [];
+    crystals.forEach(c => goals.push({
+        kind: 'crystal',
+        label: `Crystal +${Number(c.value || 0).toFixed(1)} CR`,
+        shortLabel: 'CRYSTAL',
+        x: c.x,
+        y: c.y
+    }));
+    mapObjectives.forEach(o => goals.push({
+        kind: 'objective',
+        label: formatObjectiveType(o.type),
+        shortLabel: formatObjectiveType(o.type).toUpperCase(),
+        x: o.x,
+        y: o.y
+    }));
+    if (!goals.length) return null;
+
+    let nearest = null;
+    let nearestDist = Infinity;
+    goals.forEach(g => {
+        const dist = Math.hypot(g.x - selfX, g.y - selfY);
+        if (dist < nearestDist) {
+            nearest = g;
+            nearestDist = dist;
+        }
+    });
+    return nearest ? { ...nearest, dist: nearestDist } : null;
+}
+
+function isQuestClaimed(q) {
+    return q.is_claimed === true || q.is_claimed === 1 || q.is_claimed === '1';
 }
 
 function addChatBubble(user, text) {
@@ -1705,7 +2014,7 @@ function showToast(text, type = 'success') {
 }
 
 function escapeHTML(str) {
-    return str.replace(/[&<>'"]/g, 
+    return String(str ?? '').replace(/[&<>'"]/g, 
         tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
     );
 }

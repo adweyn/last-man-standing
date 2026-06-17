@@ -25,7 +25,12 @@
 
         <!-- ─── AUTH SCREEN ─── -->
         <section id="screen-auth" class="panel">
-            <h2 class="panel-title" id="auth-title">Login</h2>
+            <h2 class="panel-title" id="auth-title">Enter Arena</h2>
+            <div class="onboarding-strip">
+                <span>1. Pick tier</span>
+                <span>2. Grab CR</span>
+                <span>3. Survive Boss</span>
+            </div>
             
             <div class="form-group">
                 <label for="username">Enter Username</label>
@@ -43,7 +48,7 @@
             </div>
 
             <div class="button-group">
-                <button id="btn-auth-submit" class="btn primary">PLAY GAME</button>
+                <button id="btn-auth-submit" class="btn primary">START SURVIVING</button>
                 <button id="btn-toggle-auth" class="btn secondary" style="display: none;">CREATE AN ACCOUNT</button>
             </div>
         </section>
@@ -56,12 +61,13 @@
                 <span id="premium-value" class="premium-pill">STANDARD</span>
             </div>
 
-            <div id="shop-panel" class="shop-panel">
-                <div class="shop-head">
-                    <span>STARS SHOP</span>
-                    <span id="tickets-value">0 CHAOS</span>
+            <div class="run-panel">
+                <div>
+                    <span class="run-kicker">NEXT RUN</span>
+                    <strong id="run-recommendation">Tier I is ready</strong>
+                    <small id="run-status">Collect CR, climb the board, survive the next wake.</small>
                 </div>
-                <div id="shop-products" class="shop-products"></div>
+                <button id="btn-focus-shop" class="mini-action ready">GET CR</button>
             </div>
 
             <div class="info-grid">
@@ -82,11 +88,19 @@
                 </div>
             </div>
 
+            <div id="shop-panel" class="shop-panel">
+                <div class="shop-head">
+                    <span>STARS SHOP</span>
+                    <span id="tickets-value">0 CHAOS</span>
+                </div>
+                <div id="shop-products" class="shop-products"></div>
+            </div>
+
             <div class="tier-cards">
                 <!-- Tier 1 Card -->
                 <div class="tier-card" data-tier="1">
-                    <h3>TIER I</h3>
-                    <p class="desc">Entry Level</p>
+                    <h3>TIER I <span class="tier-tag">LOW RISK</span></h3>
+                    <p class="desc">Fast queue, cheap retry</p>
                     <span class="fee">1 CR</span>
                     <hr>
                     <div class="card-stats">
@@ -98,8 +112,8 @@
 
                 <!-- Tier 2 Card -->
                 <div class="tier-card" data-tier="2">
-                    <h3>TIER II</h3>
-                    <p class="desc">Standard</p>
+                    <h3>TIER II <span class="tier-tag hot">ACTIVE</span></h3>
+                    <p class="desc">Bigger pool, harder pressure</p>
                     <span class="fee">5 CR</span>
                     <hr>
                     <div class="card-stats">
@@ -111,8 +125,8 @@
 
                 <!-- Tier 3 Card -->
                 <div class="tier-card" data-tier="3">
-                    <h3>TIER III</h3>
-                    <p class="desc">High Stakes</p>
+                    <h3>TIER III <span class="tier-tag danger">NO MERCY</span></h3>
+                    <p class="desc">High threat, high prize</p>
                     <span class="fee">10 CR</span>
                     <hr>
                     <div class="card-stats">
@@ -123,9 +137,18 @@
                 </div>
             </div>
 
+            <div class="start-run-panel">
+                <div>
+                    <span class="run-kicker">SELECTED WORLD</span>
+                    <strong id="selected-tier-label">Tier I - 1 CR</strong>
+                    <small id="selected-tier-hint">Low risk entry. Good for first runs and quest farming.</small>
+                </div>
+                <button id="btn-start-run" class="btn primary">START RUN</button>
+            </div>
+
             <div class="lobby-controls">
                 <button id="btn-quests" class="btn primary glow" style="margin-bottom: 15px; width: 100%;">REFRESH QUESTS</button>
-                <button id="btn-deposit" class="btn secondary">+10 CR MOCK DEPOSIT</button>
+                <button id="btn-deposit" class="btn secondary dev-only hidden">+10 CR DEV DEPOSIT</button>
                 <button id="btn-logout" class="btn link">LOGOUT</button>
             </div>
         </section>
@@ -138,9 +161,14 @@
 
                 <!-- HUD overlays -->
                 <div id="hud-objective-tip" class="hud-panel objective-tip">
-                    <span>MAP GOALS</span>
-                    <span>S SCAN | R RELAY | C CACHE</span>
-                    <span>YELLOW = CRYSTALS</span>
+                    <span id="hud-nearest-title">NEAREST GOAL</span>
+                    <span id="hud-nearest-detail">Scanning...</span>
+                    <span>S/R/C + YELLOW CR</span>
+                </div>
+
+                <div id="hud-quest-tracker" class="hud-panel quest-tracker">
+                    <span>DAILY QUEST</span>
+                    <span id="hud-quest-line">Loading...</span>
                 </div>
 
                 <div id="hud-top-left" class="hud-panel">
@@ -184,7 +212,7 @@
                 </div>
 
                 <!-- Exit button -->
-                <button id="btn-exit-game" class="btn icon-btn">🚪 LEAVE</button>
+                <button id="btn-exit-game" class="btn icon-btn">LEAVE</button>
             </div>
         </section>
     </div>
