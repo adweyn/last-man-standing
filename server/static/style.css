@@ -1,0 +1,623 @@
+/* ─── Cyberpunk Monochrome Styling ─── */
+
+:root {
+    --bg-color: #0a0a0a;
+    --text-color: #f0f0f0;
+    --text-gray: #888888;
+    --border-gray: #333333;
+    --accent-color: #e0e0e0;
+    
+    --green-neon: #00cc44;
+    --red-neon: #cc0000;
+    --yellow-neon: #ccaa00;
+    --orange-neon: #cc5500;
+    
+    --panel-bg: rgba(18, 18, 18, 0.85);
+    --panel-border: rgba(55, 55, 55, 0.5);
+    --font-header: 'Outfit', sans-serif;
+    --font-body: 'Inter', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-body);
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* ─── Drifting Background Particles ─── */
+#particles-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(circle at center, #111111 0%, #050505 100%);
+}
+
+.container {
+    width: 100%;
+    max-width: 480px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    justify-content: flex-start;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+}
+
+/* ─── Header ─── */
+header {
+    text-align: center;
+    margin-bottom: 24px;
+    margin-top: 10px;
+}
+
+.logo {
+    font-family: var(--font-header);
+    font-size: 2.2rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #fff;
+    text-transform: uppercase;
+    position: relative;
+}
+
+.logo.glow {
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    animation: titlePulse 3s infinite ease-in-out;
+}
+
+.tagline {
+    font-size: 0.65rem;
+    color: var(--text-gray);
+    letter-spacing: 3px;
+    margin-top: 6px;
+    font-weight: 700;
+}
+
+/* ─── Glassmorphism Panels ─── */
+.panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 12px;
+    padding: 24px;
+    width: 100%;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+}
+
+.panel-title {
+    font-family: var(--font-header);
+    font-size: 1.4rem;
+    text-align: center;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* ─── Forms ─── */
+.form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-gray);
+    margin-bottom: 6px;
+    font-weight: 700;
+}
+
+.form-group input {
+    background: rgba(30, 30, 30, 0.6);
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #fff;
+    padding: 12px 14px;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.form-group input:focus {
+    border-color: #fff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Buttons ─── */
+.btn {
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 14px 20px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.btn.primary {
+    background: #fff;
+    color: #000;
+}
+
+.btn.primary:hover {
+    background: var(--accent-color);
+}
+
+.btn.secondary {
+    background: transparent;
+    color: #fff;
+    border: 1px solid var(--text-gray);
+}
+
+.btn.secondary:hover {
+    border-color: #fff;
+}
+
+.btn.link {
+    background: transparent;
+    color: var(--text-gray);
+    text-decoration: underline;
+    font-size: 0.75rem;
+    padding: 8px;
+}
+
+.btn.link:hover {
+    color: #fff;
+}
+
+.btn.icon-btn {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: auto;
+    font-size: 0.75rem;
+    padding: 6px 12px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid #444;
+    z-index: 10;
+}
+
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+/* ─── Lobby / Balance ─── */
+.balance-container {
+    text-align: center;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-gray);
+    padding-bottom: 15px;
+}
+
+.balance-label {
+    font-size: 0.7rem;
+    color: var(--text-gray);
+    letter-spacing: 2px;
+    font-weight: 700;
+    display: block;
+}
+
+.balance-amount {
+    font-family: var(--font-header);
+    font-size: 2rem;
+    font-weight: 900;
+}
+
+.tier-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.tier-card {
+    background: rgba(30, 30, 30, 0.4);
+    border: 1px solid var(--border-gray);
+    border-radius: 8px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tier-card:hover {
+    border-color: #fff;
+    background: rgba(40, 40, 40, 0.6);
+}
+
+.tier-card h3 {
+    font-family: var(--font-header);
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.tier-card .desc {
+    font-size: 0.7rem;
+    color: var(--text-gray);
+}
+
+.tier-card .fee {
+    float: right;
+    margin-top: -24px;
+    font-family: var(--font-header);
+    font-size: 1.5rem;
+    font-weight: 900;
+}
+
+.tier-card hr {
+    border: 0;
+    border-top: 1px solid rgba(55,55,55,0.4);
+    margin: 8px 0;
+}
+
+.card-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--text-gray);
+}
+
+.card-stats .prize {
+    color: var(--yellow-neon);
+    font-weight: 700;
+}
+
+.card-stats .boss-status {
+    font-weight: 700;
+}
+
+.lobby-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ─── Game UI ─── */
+#screen-game {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    background: #000;
+}
+
+.game-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+#game-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* ─── HUD Overlays ─── */
+.hud-panel {
+    position: absolute;
+    background: rgba(18,18,18,0.8);
+    border: 1px solid rgba(55,55,55,0.6);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    z-index: 5;
+}
+
+#hud-top-left {
+    top: 15px;
+    left: 15px;
+    min-width: 120px;
+}
+
+#hud-top-left #hud-tier {
+    font-size: 0.6rem;
+    color: var(--text-gray);
+}
+
+#hud-top-left #hud-prize {
+    font-size: 1.1rem;
+    font-family: var(--font-header);
+}
+
+#hud-top-right {
+    top: 15px;
+    right: 15px;
+}
+
+#hud-top-right #hud-alive {
+    color: var(--green-neon);
+}
+
+#hud-bottom-right {
+    bottom: 15px;
+    right: 15px;
+    min-width: 150px;
+}
+
+#hud-bottom-right span {
+    font-size: 0.6rem;
+    color: var(--text-gray);
+}
+
+#hud-bottom-right .dot-container {
+    display: flex;
+    gap: 8px;
+    margin: 4px 0;
+}
+
+#hud-bottom-right .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border-gray);
+    border: 1px solid #fff;
+    transition: all 0.2s ease;
+}
+
+#hud-bottom-right .dot.filled {
+    background: #fff;
+}
+
+#hud-bottom-right #hud-moves-label {
+    font-size: 0.7rem;
+    color: var(--orange-neon);
+}
+
+/* ─── Boss Alarm Banner ─── */
+#boss-alert-banner {
+    position: absolute;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    z-index: 5;
+    width: 80%;
+    pointer-events: none;
+}
+
+#boss-alert-title {
+    font-family: var(--font-header);
+    font-size: 1.6rem;
+    font-weight: 900;
+    color: var(--red-neon);
+    animation: flashAlert 0.5s infinite alternate;
+}
+
+#boss-alert-subtitle {
+    font-size: 0.75rem;
+    color: #fff;
+    letter-spacing: 2px;
+}
+
+/* ─── Chat overlay ─── */
+#game-chat-container {
+    position: absolute;
+    bottom: 15px;
+    left: 15px;
+    width: 240px;
+    max-height: 180px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 6px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    z-index: 5;
+    border: 1px solid rgba(55,55,55,0.3);
+}
+
+#chat-messages {
+    overflow-y: hidden;
+    flex-grow: 1;
+    font-size: 0.7rem;
+    margin-bottom: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--accent-color);
+}
+
+.chat-msg {
+    line-height: 1.2;
+}
+
+.chat-msg span {
+    font-weight: 700;
+    color: var(--text-gray);
+    margin-right: 4px;
+}
+
+#chat-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(55,55,55,0.6);
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: #fff;
+    font-size: 0.7rem;
+    outline: none;
+}
+
+/* ─── Virtual Joystick for Touch ─── */
+#joystick-container {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 120px;
+    z-index: 8;
+    display: none; /* activated in app.js if touch device detected */
+}
+
+#joystick-base {
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    position: relative;
+}
+
+#joystick-handle {
+    width: 44px;
+    height: 44px;
+    background: rgba(255, 255, 255, 0.3);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: background 0.2s;
+}
+
+/* ─── Fullscreen Overlays ─── */
+.fullscreen-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(10, 0, 0, 0.92);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 30px;
+    text-align: center;
+}
+
+#victory-overlay {
+    background: rgba(10, 10, 0, 0.94);
+}
+
+.overlay-text {
+    font-size: 1rem;
+    color: #fff;
+    margin: 10px 0 20px;
+}
+
+.overlay-prize {
+    font-family: var(--font-header);
+    font-size: 2.5rem;
+    color: var(--green-neon);
+    font-weight: 900;
+    margin-bottom: 30px;
+}
+
+.fullscreen-overlay .btn {
+    max-width: 220px;
+}
+
+.text-red {
+    color: var(--red-neon) !important;
+}
+
+.text-yellow {
+    color: var(--yellow-neon) !important;
+}
+
+.gold {
+    color: var(--yellow-neon) !important;
+}
+
+/* Flashing Danger Borders */
+.flash-border {
+    pointer-events: none;
+    background: transparent;
+    border: 12px solid var(--red-neon);
+    box-shadow: inset 0 0 30px rgba(204,0,0,0.5);
+    animation: alertBorder 0.4s infinite alternate;
+}
+
+/* ─── Toast Alerts ─── */
+.toast {
+    position: fixed;
+    top: 15px;
+    background: #000;
+    color: #fff;
+    border: 1px solid #fff;
+    border-radius: 6px;
+    padding: 10px 18px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    z-index: 200;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+    pointer-events: none;
+    animation: slideDown 0.3s ease;
+}
+
+.toast.error {
+    border-color: var(--red-neon);
+    color: #ffb3b3;
+}
+
+.toast.success {
+    border-color: var(--green-neon);
+    color: #b3ffcc;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* ─── Keyframe Animations ─── */
+@keyframes titlePulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.02); opacity: 0.95; }
+}
+
+@keyframes flashAlert {
+    0% { opacity: 0.4; }
+    100% { opacity: 1; }
+}
+
+@keyframes alertBorder {
+    0% { border-color: rgba(204,0,0,0.2); box-shadow: inset 0 0 10px rgba(204,0,0,0.1); }
+    100% { border-color: rgba(204,0,0,0.8); box-shadow: inset 0 0 40px rgba(204,0,0,0.6); }
+}
+
+@keyframes slideDown {
+    0% { transform: translateY(-20px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+}

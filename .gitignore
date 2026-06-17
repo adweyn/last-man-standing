@@ -1,0 +1,20 @@
+# Python virtual environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Databases
+*.db
+*.sqlite3
+server/lms_game.db
+
+# Secrets
+.env
+server/.env
+
+# IDE / OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

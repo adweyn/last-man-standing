@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Last Man Standing — Telegram Mini App</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Outfit:wght@700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/telegram-app/static/style.css">
+</head>
+<body>
+
+    <!-- ─── BACKGROUND FX ─── -->
+    <div id="particles-bg"></div>
+
+    <div class="container">
+        <!-- ─── HEADER ─── -->
+        <header>
+            <h1 class="logo glow">LAST MAN STANDING</h1>
+            <p class="tagline">PERMADEATH ELIMINATION • SURVIVE OR DIE</p>
+        </header>
+
+        <!-- ─── STATUS ALERT MESSAGE ─── -->
+        <div id="status-toast" class="toast hidden"></div>
+
+        <!-- ─── AUTH SCREEN ─── -->
+        <section id="screen-auth" class="panel">
+            <h2 class="panel-title" id="auth-title">Login</h2>
+            
+            <div class="form-group">
+                <label for="username">Enter Username</label>
+                <input type="text" id="username" placeholder="Choose a username..." autocomplete="off">
+            </div>
+
+            <div class="form-group" style="display: none;">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter password" value="dummy">
+            </div>
+
+            <div class="form-group hidden" id="email-group" style="display: none;">
+                <label for="email">Email (Optional)</label>
+                <input type="email" id="email" placeholder="Enter email address">
+            </div>
+
+            <div class="button-group">
+                <button id="btn-auth-submit" class="btn primary">PLAY GAME</button>
+                <button id="btn-toggle-auth" class="btn secondary" style="display: none;">CREATE AN ACCOUNT</button>
+            </div>
+        </section>
+
+        <!-- ─── LOBBY / TIER SELECTION SCREEN ─── -->
+        <section id="screen-lobby" class="panel hidden">
+            <div class="balance-container">
+                <span class="balance-label">ACCOUNT BALANCE</span>
+                <span id="balance-value" class="balance-amount">$0.00</span>
+            </div>
+
+            <div class="tier-cards">
+                <!-- Tier 1 Card -->
+                <div class="tier-card" data-tier="1">
+                    <h3>TIER I</h3>
+                    <p class="desc">Entry Level</p>
+                    <span class="fee">$1</span>
+                    <hr>
+                    <div class="card-stats">
+                        <span class="prize" id="t1-prize">Prize: $0.00</span>
+                        <span class="survivors" id="t1-alive">Survivors: 0 / 0</span>
+                        <span class="boss-status" id="t1-boss">Boss: SLEEPING</span>
+                    </div>
+                </div>
+
+                <!-- Tier 2 Card -->
+                <div class="tier-card" data-tier="2">
+                    <h3>TIER II</h3>
+                    <p class="desc">Standard</p>
+                    <span class="fee">$5</span>
+                    <hr>
+                    <div class="card-stats">
+                        <span class="prize" id="t2-prize">Prize: $0.00</span>
+                        <span class="survivors" id="t2-alive">Survivors: 0 / 0</span>
+                        <span class="boss-status" id="t2-boss">Boss: SLEEPING</span>
+                    </div>
+                </div>
+
+                <!-- Tier 3 Card -->
+                <div class="tier-card" data-tier="3">
+                    <h3>TIER III</h3>
+                    <p class="desc">High Stakes</p>
+                    <span class="fee">$10</span>
+                    <hr>
+                    <div class="card-stats">
+                        <span class="prize" id="t3-prize">Prize: $0.00</span>
+                        <span class="survivors" id="t3-alive">Survivors: 0 / 0</span>
+                        <span class="boss-status" id="t3-boss">Boss: SLEEPING</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lobby-controls">
+                <button id="btn-deposit" class="btn secondary">+$10.00 DEPOSIT (MOCK)</button>
+                <button id="btn-logout" class="btn link">LOGOUT</button>
+            </div>
+        </section>
+
+        <!-- ─── GAME SCREEN ─── -->
+        <section id="screen-game" class="hidden">
+            <div class="game-container">
+                <!-- Canvas -->
+                <canvas id="game-canvas"></canvas>
+
+                <!-- HUD overlays -->
+                <div id="hud-top-left" class="hud-panel">
+                    <span id="hud-tier">TIER 1</span>
+                    <span id="hud-prize" class="gold">$0.00</span>
+                </div>
+
+                <div id="hud-top-right" class="hud-panel">
+                    <span id="hud-alive">ALIVE: 0 / 0</span>
+                </div>
+
+                <!-- Center Alert -->
+                <div id="boss-alert-banner" class="hidden">
+                    <h2 id="boss-alert-title">BOSS IS WAKING!</h2>
+                    <p id="boss-alert-subtitle">PREPARE TO RUN</p>
+                </div>
+
+                <!-- Bottom Controls (AFK Indicator) -->
+                <div id="hud-bottom-right" class="hud-panel">
+                    <span>DAILY MOVES</span>
+                    <div class="dot-container">
+                        <div id="dot-1" class="dot"></div>
+                        <div id="dot-2" class="dot"></div>
+                    </div>
+                    <span id="hud-moves-label" class="warning">0/2 moves</span>
+                </div>
+
+                <!-- In-Game Chat overlay -->
+                <div id="game-chat-container">
+                    <div id="chat-messages"></div>
+                    <form id="chat-form">
+                        <input type="text" id="chat-input" placeholder="Press Enter to send chat..." maxlength="120">
+                    </form>
+                </div>
+
+                <!-- Touch Joystick Overlay -->
+                <div id="joystick-container">
+                    <div id="joystick-base">
+                        <div id="joystick-handle"></div>
+                    </div>
+                </div>
+
+                <!-- Exit button -->
+                <button id="btn-exit-game" class="btn icon-btn">🚪 LEAVE</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- ─── OVERLAYS ─── -->
+    <div id="death-overlay" class="fullscreen-overlay hidden">
+        <h1 class="logo text-red">YOU DIED</h1>
+        <p id="death-reason" class="overlay-text">Eliminated by the Boss.</p>
+        <button id="btn-death-exit" class="btn primary">RETURN TO LOBBY</button>
+    </div>
+
+    <div id="victory-overlay" class="fullscreen-overlay hidden">
+        <h1 class="logo text-yellow">VICTORY</h1>
+        <p class="overlay-text">You are the Last Man Standing!</p>
+        <p id="victory-prize" class="overlay-prize">$0.00</p>
+        <button id="btn-victory-exit" class="btn primary">CLAIM REWARD</button>
+    </div>
+
+    <div id="boss-flash-screen" class="fullscreen-overlay flash-border hidden"></div>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/telegram-app/static/app.js"></script>
+</body>
+</html>

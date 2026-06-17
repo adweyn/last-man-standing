@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LMS Alerts — Companion PWA</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --fg: #f0f0f0;
+      --gray: #888888;
+      --dark-gray: #181818;
+      --border: #333333;
+      --red: #cc0000;
+      --green: #00cc44;
+      --yellow: #ccaa00;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--fg);
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    header {
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 28px;
+      letter-spacing: 2px;
+      text-shadow: 0 0 10px rgba(255,255,255,0.1);
+      margin-bottom: 8px;
+    }
+
+    p.subtitle {
+      color: var(--gray);
+      font-size: 13px;
+    }
+
+    .card {
+      background-color: var(--dark-gray);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .status-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.disconnected {
+      background-color: rgba(204, 0, 0, 0.15);
+      color: var(--red);
+      border: 1px solid var(--red);
+    }
+
+    .status-badge.connected {
+      background-color: rgba(0, 204, 68, 0.15);
+      color: var(--green);
+      border: 1px solid var(--green);
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    input {
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--fg);
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      border-color: var(--fg);
+    }
+
+    button {
+      background-color: var(--fg);
+      color: var(--bg);
+      border: none;
+      border-radius: 4px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background-color: #ffffff;
+    }
+
+    button.secondary {
+      background-color: transparent;
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+
+    button.secondary:hover {
+      border-color: var(--fg);
+    }
+
+    .alert-banner {
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      text-align: center;
+      display: none;
+    }
+
+    .alert-banner.success {
+      background-color: rgba(0, 204, 68, 0.1);
+      border: 1px solid var(--green);
+      color: var(--green);
+    }
+
+    .alert-banner.error {
+      background-color: rgba(204, 0, 0, 0.1);
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+
+    .instructions-list {
+      list-style-type: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--gray);
+    }
+
+    .instructions-list li {
+      display: flex;
+      gap: 8px;
+    }
+
+    .instructions-list li::before {
+      content: "•";
+      color: var(--fg);
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>LMS ALERTS</h1>
+      <p class="subtitle">Last Man Standing Mobile Companion App</p>
+    </header>
+
+    <!-- ALERT BANNER -->
+    <div id="alertBanner" class="alert-banner"></div>
+
+    <!-- 1. LOGIN & SYNC -->
+    <div class="card" id="loginCard">
+      <div class="card-title">
+        <span>LINK PC ACCOUNT</span>
+        <span id="syncStatus" class="status-badge disconnected">Unlinked</span>
+      </div>
+      <div class="form-group">
+        <label for="serverUrl">API Address</label>
+        <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="http://192.168.1.50:8000">
+      </div>
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="Enter PC username">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter password">
+      </div>
+      <button id="loginBtn">LINK ACCOUNT & SUBSCRIBE</button>
+    </div>
+
+    <!-- 2. PUSH MANAGEMENT -->
+    <div class="card" id="profileCard" style="display: none;">
+      <div class="card-title">
+        <span>LINKED PROFILE</span>
+        <span class="status-badge connected">Linked</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 14px;">
+        <span style="color: var(--gray)">Account:</span>
+        <span id="profileUsername" style="font-weight: 600;">-</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 14px;">
+        <span style="color: var(--gray)">Wallet:</span>
+        <span id="profileBalance" style="color: var(--green); font-weight: 600;">$0.00</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 14px;">
+        <span style="color: var(--gray)">Notification Status:</span>
+        <span id="notifStatus" style="font-weight: 600;">Checking permissions...</span>
+      </div>
+      <button id="requestNotifBtn">ENABLE PUSH ALERTS</button>
+      <button id="logoutBtn" class="secondary">UNLINK ACCOUNT</button>
+    </div>
+
+    <!-- 3. INSTRUCTIONS -->
+    <div class="card">
+      <div class="card-title">SETUP INSTRUCTIONS</div>
+      <ul class="instructions-list">
+        <li>Make sure this mobile companion is running on the same network or hosted with TLS.</li>
+        <li>Login using the credentials created on the PC standalone app.</li>
+        <li>Accept notification permissions to receive real-time push alerts.</li>
+        <li>When the Boss wakes, your phone will alert you immediately to log in and dodge.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- FIREBASE APP SDKS -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
