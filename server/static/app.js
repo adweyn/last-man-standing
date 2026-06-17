@@ -41,7 +41,7 @@ let selfPlayerId = null;
 let selfX = WORLD_WIDTH / 2;
 let selfY = WORLD_HEIGHT / 2;
 let playersMap = new Map(); // id -> { username, x, y, is_alive }
-let bossState = { state: 'sleeping', x: 0, y: 0, time_remaining: 0, target_username: '' };
+let bossState = { state: 'sleeping', x: 0, y: 0, targetX: 0, targetY: 0, time_remaining: 0, target_username: '' };
 
 // Physics / Viewport
 let camX = selfX;
@@ -384,10 +384,21 @@ function connectWebSocket() {
         }
         else if (mtype === 'player_list') {
             const list = data.players;
-            playersMap.clear();
+            const activeIds = new Set();
             list.forEach(p => {
                 if (p.id !== selfPlayerId) {
-                    playersMap.set(p.id, p);
+                    activeIds.add(p.id);
+                    if (playersMap.has(p.id)) {
+                        const existing = playersMap.get(p.id);
+                        existing.targetX = p.x;
+                        existing.targetY = p.y;
+                        existing.is_alive = p.is_alive;
+                    } else {
+                        // New player: set start positions immediately, targets match
+                        p.targetX = p.x;
+                        p.targetY = p.y;
+                        playersMap.set(p.id, p);
+                    }
                 } else {
                     // Sync alive status
                     if (!p.is_alive) {
@@ -396,13 +407,30 @@ function connectWebSocket() {
                 }
             });
 
+            // Remove players that disconnected
+            for (let id of playersMap.keys()) {
+                if (!activeIds.has(id)) {
+                    playersMap.delete(id);
+                }
+            }
+
             // Update HUD counter
             const aliveCount = list.filter(p => p.is_alive).length;
             const totalCount = list.length;
             hudAlive.textContent = `ALIVE: ${aliveCount} / ${totalCount}`;
         }
         else if (mtype === 'boss_update') {
-            bossState = data.boss;
+            bossState.state = data.boss.state;
+            bossState.targetX = data.boss.x;
+            bossState.targetY = data.boss.y;
+            bossState.time_remaining = data.boss.time_remaining;
+            bossState.target_username = data.boss.target_username;
+            
+            // On first wake, snap position directly to target to avoid sliding from (0,0)
+            if (bossState.x === 0 && bossState.y === 0) {
+                bossState.x = data.boss.x;
+                bossState.y = data.boss.y;
+            }
             updateBossHUD();
         }
         else if (mtype === 'chat_message') {
@@ -647,6 +675,20 @@ function update(dt) {
 
     // Update Particles
     particles = updateParticles(particles, dt);
+
+    // Interpolate positions of other players for smooth movement
+    playersMap.forEach(p => {
+        if (p.targetX !== undefined && p.targetY !== undefined) {
+            p.x += (p.targetX - p.x) * 15 * dt;
+            p.y += (p.targetY - p.y) * 15 * dt;
+        }
+    });
+
+    // Interpolate boss position for smooth movement
+    if (bossState.state !== 'sleeping' && bossState.targetX !== undefined && bossState.targetY !== undefined) {
+        bossState.x += (bossState.targetX - bossState.x) * 15 * dt;
+        bossState.y += (bossState.targetY - bossState.y) * 15 * dt;
+    }
 
     // Update daily moves check indicators
     if (userProfile) {

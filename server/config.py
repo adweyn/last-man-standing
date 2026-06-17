@@ -93,7 +93,7 @@ JWT_EXPIRE_HOURS = 24 * JWT_EXPIRE_DAYS
 # ---------------------------------------------------------------------------
 # Broadcast cadence
 # ---------------------------------------------------------------------------
-PLAYER_LIST_INTERVAL: float = 0.5   # seconds between full player-list broadcasts
+PLAYER_LIST_INTERVAL: float = 0.1   # seconds between full player-list broadcasts
 BOSS_UPDATE_INTERVAL: float = 0.1   # seconds between boss-state broadcasts
 BOSS_MOVE_INTERVAL: float = 0.1     # seconds between boss AI position updates
 
