@@ -64,6 +64,24 @@
                 <div id="shop-products" class="shop-products"></div>
             </div>
 
+            <div class="info-grid">
+                <div class="info-panel">
+                    <div class="shop-head">
+                        <span>DAILY QUESTS</span>
+                        <span>CLAIM CR</span>
+                    </div>
+                    <div id="quest-list" class="mini-list"></div>
+                </div>
+
+                <div class="info-panel">
+                    <div class="shop-head">
+                        <span>LEADERBOARD</span>
+                        <span>TOP 5</span>
+                    </div>
+                    <div id="leaderboard-list" class="mini-list"></div>
+                </div>
+            </div>
+
             <div class="tier-cards">
                 <!-- Tier 1 Card -->
                 <div class="tier-card" data-tier="1">
@@ -106,7 +124,7 @@
             </div>
 
             <div class="lobby-controls">
-                <button id="btn-quests" class="btn primary glow" style="margin-bottom: 15px; width: 100%;">📋 DAILY QUESTS</button>
+                <button id="btn-quests" class="btn primary glow" style="margin-bottom: 15px; width: 100%;">REFRESH QUESTS</button>
                 <button id="btn-deposit" class="btn secondary">+10 CR MOCK DEPOSIT</button>
                 <button id="btn-logout" class="btn link">LOGOUT</button>
             </div>
@@ -119,6 +137,12 @@
                 <canvas id="game-canvas"></canvas>
 
                 <!-- HUD overlays -->
+                <div id="hud-objective-tip" class="hud-panel objective-tip">
+                    <span>MAP GOALS</span>
+                    <span>S SCAN | R RELAY | C CACHE</span>
+                    <span>YELLOW = CRYSTALS</span>
+                </div>
+
                 <div id="hud-top-left" class="hud-panel">
                     <span id="hud-tier">TIER 1</span>
                     <span id="hud-prize" class="gold">0 CR</span>

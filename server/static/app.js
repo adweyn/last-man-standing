@@ -52,6 +52,7 @@ let camY = selfY;
 let keysPressed = {};
 let particles = []; // Array of particle dicts
 let obstacleList = []; // deterministic columns
+let districtZones = [];
 
 // Touch Joystick State
 let joystickActive = false;
@@ -79,11 +80,14 @@ const btnToggleAuth = document.getElementById('btn-toggle-auth');
 const btnDeposit = document.getElementById('btn-deposit');
 const btnLogout = document.getElementById('btn-logout');
 const btnExitGame = document.getElementById('btn-exit-game');
+const btnQuests = document.getElementById('btn-quests');
 
 const balanceValue = document.getElementById('balance-value');
 const premiumValue = document.getElementById('premium-value');
 const ticketsValue = document.getElementById('tickets-value');
 const shopProducts = document.getElementById('shop-products');
+const questList = document.getElementById('quest-list');
+const leaderboardList = document.getElementById('leaderboard-list');
 const toastAlert = document.getElementById('status-toast');
 
 const deathOverlay = document.getElementById('death-overlay');
@@ -251,8 +255,13 @@ async function showLobbyScreen() {
     screenGame.classList.add('hidden');
 
     await fetchLobbyData();
+    await fetchQuests();
+    await fetchLeaderboard();
     clearInterval(tierStatsInterval);
-    tierStatsInterval = setInterval(fetchLobbyData, 4000);
+    tierStatsInterval = setInterval(() => {
+        fetchLobbyData();
+        fetchLeaderboard();
+    }, 4000);
 
     // Click cards to join
     document.querySelectorAll('.tier-card').forEach(card => {
@@ -365,6 +374,98 @@ async function buyShopProduct(productId) {
     } catch (e) {
         showToast('Payment connection failed', 'error');
     }
+}
+
+async function fetchQuests() {
+    if (!authToken || !questList) return;
+    try {
+        const resp = await fetch(`${SERVER_API_URL}/quests`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const quests = await resp.json();
+        questList.innerHTML = '';
+        quests.forEach(q => {
+            const done = Number(q.progress) >= Number(q.target);
+            const claimed = Boolean(q.is_claimed);
+            const pct = Math.min(100, Math.round((Number(q.progress) / Number(q.target)) * 100));
+            const row = document.createElement('div');
+            row.className = 'mini-row';
+            row.innerHTML = `
+                <div>
+                    <strong>${formatQuestName(q.quest_type)}</strong>
+                    <small>${pct}% | ${Number(q.progress).toFixed(0)} / ${Number(q.target).toFixed(0)} | +${Number(q.reward).toFixed(2)} CR</small>
+                </div>
+                <button class="mini-action ${done && !claimed ? 'ready' : ''}" data-quest="${escapeHTML(q.quest_type)}">${claimed ? 'DONE' : done ? 'CLAIM' : 'RUN'}</button>
+            `;
+            questList.appendChild(row);
+        });
+        questList.querySelectorAll('.mini-action.ready').forEach(btn => {
+            btn.addEventListener('click', () => claimQuest(btn.getAttribute('data-quest')));
+        });
+    } catch (e) {
+        console.error('Error fetching quests', e);
+    }
+}
+
+async function claimQuest(questType) {
+    try {
+        const resp = await fetch(`${SERVER_API_URL}/quests/claim`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ quest_type: questType })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            showToast(data.detail || 'Quest not ready', 'error');
+            return;
+        }
+        showToast(`Claimed +${Number(data.reward).toFixed(2)} CR`, 'success');
+        await fetchLobbyData();
+        await fetchQuests();
+    } catch (e) {
+        showToast('Quest claim failed', 'error');
+    }
+}
+
+async function fetchLeaderboard() {
+    if (!leaderboardList) return;
+    try {
+        const resp = await fetch(`${SERVER_API_URL}/leaderboard`);
+        if (!resp.ok) return;
+        const rows = (await resp.json()).slice(0, 5);
+        leaderboardList.innerHTML = '';
+        if (!rows.length) {
+            leaderboardList.innerHTML = '<div class="mini-row"><div><strong>No runs yet</strong><small>Be first on the board</small></div><span>--</span></div>';
+            return;
+        }
+        rows.forEach((r, idx) => {
+            const seconds = Math.max(0, Math.floor(Number(r.survival_time || 0)));
+            const row = document.createElement('div');
+            row.className = 'mini-row';
+            row.innerHTML = `
+                <div>
+                    <strong>#${idx + 1} ${escapeHTML(r.username || 'Unknown')}</strong>
+                    <small>Tier ${r.tier_id} | ${formatDuration(seconds)} | ${escapeHTML(r.eliminated_by || 'alive')}</small>
+                </div>
+                <span>${seconds}s</span>
+            `;
+            leaderboardList.appendChild(row);
+        });
+    } catch (e) {
+        console.error('Error fetching leaderboard', e);
+    }
+}
+
+if (btnQuests) {
+    btnQuests.addEventListener('click', async () => {
+        await fetchQuests();
+        await fetchLeaderboard();
+        showToast('Progress refreshed', 'success');
+    });
 }
 
 btnDeposit.addEventListener('click', async () => {
@@ -621,26 +722,44 @@ chatForm.addEventListener('submit', (e) => {
 function setupJoystickEvents() {
     const base = document.getElementById('joystick-base');
 
-    base.addEventListener('touchstart', (e) => {
+    const stopGesture = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    canvas.addEventListener('touchmove', stopGesture, { passive: false });
+    canvas.addEventListener('touchstart', stopGesture, { passive: false });
+    joystickContainer.addEventListener('touchmove', stopGesture, { passive: false });
+    joystickContainer.addEventListener('touchstart', stopGesture, { passive: false });
+
+    base.addEventListener('pointerdown', (e) => {
+        stopGesture(e);
         joystickActive = true;
+        base.setPointerCapture?.(e.pointerId);
         const rect = base.getBoundingClientRect();
         joystickStartPos = {
             x: rect.left + rect.width / 2,
             y: rect.top + rect.height / 2
         };
-        handleJoystickMove(e.targetTouches[0]);
+        handleJoystickMove(e);
     });
 
-    base.addEventListener('touchmove', (e) => {
+    base.addEventListener('pointermove', (e) => {
+        stopGesture(e);
         if (!joystickActive) return;
-        handleJoystickMove(e.targetTouches[0]);
+        handleJoystickMove(e);
     });
 
-    base.addEventListener('touchend', () => {
+    const endJoystick = (e) => {
+        if (e) stopGesture(e);
         joystickActive = false;
         joystickOffset = { x: 0, y: 0 };
         joystickHandle.style.transform = 'translate(-50%, -50%)';
-    });
+    };
+
+    base.addEventListener('pointerup', endJoystick);
+    base.addEventListener('pointercancel', endJoystick);
+    base.addEventListener('lostpointercapture', endJoystick);
 }
 
 function handleJoystickMove(touch) {
@@ -662,8 +781,15 @@ function handleJoystickMove(touch) {
 // ─── DETERMINISTIC OBSTACLES ───
 function generateObstacles() {
     obstacleList = [];
+    districtZones = [
+        { x: 700, y: 820, w: 760, h: 420, type: 'ruins', label: 'RUINS' },
+        { x: 2450, y: 520, w: 880, h: 520, type: 'signal', label: 'SIGNAL FIELD' },
+        { x: 530, y: 2520, w: 940, h: 620, type: 'fog', label: 'BLACK FOG' },
+        { x: 2320, y: 2460, w: 1060, h: 760, type: 'vault', label: 'VAULT WARD' },
+        { x: 1650, y: 1540, w: 760, h: 720, type: 'center', label: 'DEAD CENTER' }
+    ];
     // seed equivalent based on activeTier or simple sequence
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 56; i++) {
         // Pseudo-random deterministic placement
         const seedVal = Math.sin(i * 927.32) * 1000;
         const ox = 150 + Math.abs(seedVal % (WORLD_WIDTH - 300));
@@ -826,7 +952,10 @@ function draw() {
     ctx.lineWidth = 4;
     ctx.strokeRect(offsetX, offsetY, WORLD_WIDTH, WORLD_HEIGHT);
 
-    // 3. Draw Obstacles
+    // 3. Draw district zones
+    drawDistrictZones(offsetX, offsetY);
+
+    // 4. Draw Obstacles
     ctx.fillStyle = '#222';
     ctx.strokeStyle = '#555';
     ctx.lineWidth = 2;
@@ -837,17 +966,17 @@ function draw() {
         ctx.stroke();
     }
 
-    // 4. Draw Particles
+    // 5. Draw Particles
     drawParticles(offsetX, offsetY);
 
-    // 5. Draw map quest objects
+    // 6. Draw map quest objects
     drawCrystals(offsetX, offsetY);
     drawMapObjectives(offsetX, offsetY);
 
-    // 6. Draw temporary hazard zones
+    // 7. Draw temporary hazard zones
     drawHazards(offsetX, offsetY);
 
-    // 7. Draw Other Players
+    // 8. Draw Other Players
     playersMap.forEach(p => {
         if (p.is_alive) {
             drawCyberAvatar(p.x + offsetX, p.y + offsetY, COLORS.GRAY, false, p.username);
@@ -856,20 +985,20 @@ function draw() {
         }
     });
 
-    // 8. Draw Self
+    // 9. Draw Self
     const selfAlive = deathOverlay.classList.contains('hidden');
-    if (!selfAlive) {
+    if (selfAlive) {
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
     } else {
         drawTombstone(selfX + offsetX, selfY + offsetY);
     }
 
-    // 9. Draw Boss AI Void Creature
+    // 10. Draw Boss AI Void Creature
     if (bossState.state !== 'sleeping') {
         drawBoss(bossState.x + offsetX, bossState.y + offsetY);
     }
 
-    // 10. Draw Minimap Overlay
+    // 11. Draw Minimap Overlay
     drawMinimap();
 }
 
@@ -896,6 +1025,50 @@ function drawGrid(ox, oy) {
         ctx.lineTo(endX + ox, y + oy);
         ctx.stroke();
     }
+}
+
+function drawDistrictZones(ox, oy) {
+    const t = Date.now() / 1000;
+    districtZones.forEach(zone => {
+        const x = zone.x + ox;
+        const y = zone.y + oy;
+        const palette = getDistrictPalette(zone.type);
+
+        ctx.fillStyle = palette.fill;
+        ctx.strokeStyle = palette.stroke;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(zone.type === 'fog' ? [10, 8] : []);
+        ctx.fillRect(x, y, zone.w, zone.h);
+        ctx.strokeRect(x, y, zone.w, zone.h);
+        ctx.setLineDash([]);
+
+        if (zone.type === 'signal') {
+            ctx.strokeStyle = 'rgba(0, 204, 68, 0.18)';
+            ctx.lineWidth = 1;
+            for (let sx = x + 40; sx < x + zone.w; sx += 70) {
+                ctx.beginPath();
+                ctx.moveTo(sx + Math.sin(t + sx) * 4, y);
+                ctx.lineTo(sx, y + zone.h);
+                ctx.stroke();
+            }
+        }
+
+        if (zone.type === 'fog') {
+            ctx.fillStyle = 'rgba(0,0,0,0.18)';
+            for (let i = 0; i < 18; i++) {
+                const fx = x + ((i * 83 + t * 12) % zone.w);
+                const fy = y + ((i * 47 + Math.sin(t + i) * 30) % zone.h);
+                ctx.beginPath();
+                ctx.arc(fx, fy, 26 + (i % 4) * 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        ctx.fillStyle = palette.text;
+        ctx.font = '900 11px Inter';
+        ctx.textAlign = 'left';
+        ctx.fillText(zone.label, x + 14, y + 22);
+    });
 }
 
 // ─── CYBER HUMAN PILOT DRAWING ───
@@ -1171,6 +1344,12 @@ function drawMinimap() {
 
     const scale = mapSize / WORLD_WIDTH;
 
+    districtZones.forEach(zone => {
+        const palette = getDistrictPalette(zone.type);
+        ctx.fillStyle = palette.map;
+        ctx.fillRect(mx + zone.x * scale, my + zone.y * scale, zone.w * scale, zone.h * scale);
+    });
+
     // Draw Obstacles on map
     ctx.fillStyle = '#1f1f1f';
     for (let obs of obstacleList) {
@@ -1355,6 +1534,21 @@ function formatObjectiveType(type) {
     return 'objective';
 }
 
+function formatQuestName(type) {
+    if (type === 'explorer') return 'Explorer';
+    if (type === 'survivor') return 'Survivor';
+    if (type === 'scavenger') return 'Scavenger';
+    return 'Quest';
+}
+
+function formatDuration(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return `${mins}m ${secs}s`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ${mins % 60}m`;
+}
+
 function getObjectiveGlyph(type) {
     if (type === 'scan') return 'S';
     if (type === 'relay') return 'R';
@@ -1367,6 +1561,47 @@ function getObjectiveColor(type) {
     if (type === 'relay') return { fill: 'rgba(204, 170, 0, 0.13)', stroke: COLORS.YELLOW };
     if (type === 'cache') return { fill: 'rgba(204, 85, 0, 0.13)', stroke: COLORS.ORANGE };
     return { fill: 'rgba(255, 255, 255, 0.1)', stroke: COLORS.WHITE };
+}
+
+function getDistrictPalette(type) {
+    if (type === 'ruins') {
+        return {
+            fill: 'rgba(255, 255, 255, 0.025)',
+            stroke: 'rgba(255, 255, 255, 0.16)',
+            text: 'rgba(255,255,255,0.42)',
+            map: 'rgba(255,255,255,0.12)'
+        };
+    }
+    if (type === 'signal') {
+        return {
+            fill: 'rgba(0, 204, 68, 0.035)',
+            stroke: 'rgba(0, 204, 68, 0.28)',
+            text: 'rgba(0, 204, 68, 0.72)',
+            map: 'rgba(0,204,68,0.18)'
+        };
+    }
+    if (type === 'fog') {
+        return {
+            fill: 'rgba(0, 0, 0, 0.22)',
+            stroke: 'rgba(204, 0, 0, 0.22)',
+            text: 'rgba(204,0,0,0.68)',
+            map: 'rgba(204,0,0,0.12)'
+        };
+    }
+    if (type === 'vault') {
+        return {
+            fill: 'rgba(204, 170, 0, 0.035)',
+            stroke: 'rgba(204, 170, 0, 0.26)',
+            text: 'rgba(204,170,0,0.74)',
+            map: 'rgba(204,170,0,0.16)'
+        };
+    }
+    return {
+        fill: 'rgba(255,255,255,0.018)',
+        stroke: 'rgba(255,255,255,0.12)',
+        text: 'rgba(255,255,255,0.38)',
+        map: 'rgba(255,255,255,0.08)'
+    };
 }
 
 function triggerVictoryOverlay(prize) {

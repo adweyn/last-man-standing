@@ -114,6 +114,14 @@ SHOP_PRODUCTS: dict[str, dict] = {
         "grant_chaos_tickets": 0,
         "premium_days": 0,
     },
+    "credits_350": {
+        "title": "350 Credits",
+        "description": "Best-value credit bundle for longer runs.",
+        "stars": 249,
+        "grant_credits": 350.0,
+        "grant_chaos_tickets": 1,
+        "premium_days": 0,
+    },
     "chaos_ticket_3": {
         "title": "3 Chaos Tickets",
         "description": "Unlocks optional No Mercy rooms when available.",
@@ -129,6 +137,14 @@ SHOP_PRODUCTS: dict[str, dict] = {
         "grant_credits": 30.0,
         "grant_chaos_tickets": 2,
         "premium_days": 30,
+    },
+    "season_pass_90": {
+        "title": "90 Day Season Pass",
+        "description": "Premium status, event access, tickets, and 150 credits.",
+        "stars": 399,
+        "grant_credits": 150.0,
+        "grant_chaos_tickets": 8,
+        "premium_days": 90,
     },
 }
 
