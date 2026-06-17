@@ -6,7 +6,9 @@ Polls for updates and replies with a Web App launcher button.
 import asyncio
 import logging
 import aiohttp
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_MINI_APP_URL
+import json
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_MINI_APP_URL, SHOP_PRODUCTS
+import database
 
 logger = logging.getLogger("LMS_TELEGRAM_BOT")
 
@@ -68,7 +70,7 @@ class TelegramBotRunner:
                 params = {
                     "offset": self.offset,
                     "timeout": 30,
-                    "allowed_updates": ["message"]
+                    "allowed_updates": ["message", "pre_checkout_query"]
                 }
                 async with self.session.get(f"{api_url}/getUpdates", params=params, timeout=35) as resp:
                     if resp.status != 200:
@@ -85,6 +87,10 @@ class TelegramBotRunner:
                     updates = data.get("result", [])
                     for update in updates:
                         self.offset = update["update_id"] + 1
+                        pre_checkout = update.get("pre_checkout_query")
+                        if pre_checkout:
+                            await self._handle_pre_checkout(api_url, pre_checkout)
+                            continue
                         message = update.get("message")
                         if message:
                             await self._handle_message(api_url, message)
@@ -103,6 +109,11 @@ class TelegramBotRunner:
         text = message.get("text", "").strip()
 
         if not chat_id:
+            return
+
+        successful_payment = message.get("successful_payment")
+        if successful_payment:
+            await self._handle_successful_payment(api_url, chat_id, successful_payment)
             return
 
         if text.startswith("/start"):
@@ -156,3 +167,55 @@ class TelegramBotRunner:
                         logger.error(f"Failed to send welcome message: {err_text}")
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
+
+    async def _handle_pre_checkout(self, api_url: str, query: dict):
+        query_id = query.get("id")
+        payload = query.get("invoice_payload", "")
+        ok = False
+        error_message = "Unknown order"
+        try:
+            order = await database.get_payment_order_by_payload(payload)
+            payload_data = json.loads(payload)
+            product = SHOP_PRODUCTS.get(payload_data.get("product_id"))
+            if order and product and order["status"] == "pending":
+                ok = True
+                error_message = ""
+        except Exception as e:
+            logger.error(f"Error validating pre-checkout payload: {e}")
+            error_message = "Payment validation failed"
+
+        body = {"pre_checkout_query_id": query_id, "ok": ok}
+        if not ok:
+            body["error_message"] = error_message
+        try:
+            async with self.session.post(f"{api_url}/answerPreCheckoutQuery", json=body) as resp:
+                if resp.status != 200:
+                    logger.error(f"Failed to answer pre-checkout query: {await resp.text()}")
+        except Exception as e:
+            logger.error(f"Error answering pre-checkout query: {e}")
+
+    async def _handle_successful_payment(self, api_url: str, chat_id: int, payment: dict):
+        payload = payment.get("invoice_payload", "")
+        charge_id = payment.get("telegram_payment_charge_id", "")
+        try:
+            payload_data = json.loads(payload)
+            product = SHOP_PRODUCTS.get(payload_data.get("product_id"))
+            if not product:
+                raise ValueError("Unknown product")
+            player = await database.fulfill_payment_order(payload, charge_id, product)
+            if not player:
+                raise ValueError("Unknown payment order")
+
+            text = (
+                f"Payment confirmed: {product['title']}\n"
+                f"Credits: {player['balance']:.2f}\n"
+                f"Chaos tickets: {player.get('chaos_tickets', 0)}"
+            )
+        except Exception as e:
+            logger.error(f"Error fulfilling successful payment: {e}")
+            text = "Payment received, but delivery failed. Contact support with your payment receipt."
+
+        try:
+            await self.session.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": text})
+        except Exception as e:
+            logger.error(f"Error sending payment confirmation: {e}")

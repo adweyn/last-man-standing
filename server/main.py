@@ -81,7 +81,8 @@ async def main():
             get_players_callback=get_players,
             kill_player_callback=kill_player,
             notify_callback=boss_notify_callback,
-            event_log_callback=boss_event_log_callback
+            event_log_callback=boss_event_log_callback,
+            difficulty_callback=database.get_tier_difficulty_level
         )
         # Start the individual boss cycle
         boss_instances[tier].start()

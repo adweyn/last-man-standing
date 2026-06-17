@@ -6,7 +6,7 @@ Monitors alive players in each tier and enforces movement rules.
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Any
+from typing import Callable, Any, Optional
 
 from config import (
     AFK_DAILY_MOVES_REQUIRED, AFK_WARNING_HOUR_UTC, AFK_DEADLINE_HOUR_UTC

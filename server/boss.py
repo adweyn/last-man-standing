@@ -24,13 +24,15 @@ class BossAI:
         get_players_callback: Callable[[], list],
         kill_player_callback: Callable[[int, str], Any],  # player_id, reason
         notify_callback: Callable[[int, int], Any],       # tier_id, seconds_remaining
-        event_log_callback: Callable[[str, int], Any]      # event_type ('start'|'hunt'|'end'), extra
+        event_log_callback: Callable[[str, int], Any],     # event_type ('start'|'hunt'|'end'), extra
+        difficulty_callback: Optional[Callable[[int], Any]] = None
     ):
         self.tier_id = tier_id
         self.get_players_callback = get_players_callback  # returns list of dicts: {"id": int, "username": str, "x": float, "y": float, "last_move_time": float, "is_alive": bool}
         self.kill_player_callback = kill_player_callback
         self.notify_callback = notify_callback
         self.event_log_callback = event_log_callback
+        self.difficulty_callback = difficulty_callback
 
         # Initial boss position (spawn in center of world)
         self.x = float(WORLD_WIDTH // 2)
@@ -42,6 +44,7 @@ class BossAI:
         self.target_player: Optional[Dict[str, Any]] = None
         self.kills_this_event = 0
         self.active_event_id: Optional[int] = None
+        self.difficulty_level = 0
 
         # Task handle for the boss behavior loop
         self.loop_task: Optional[asyncio.Task] = None
@@ -63,7 +66,8 @@ class BossAI:
             "state": self.state,
             "time_remaining": int(max(0.0, self.time_remaining)),
             "target_username": self.target_player["username"] if self.target_player else None,
-            "kills": self.kills_this_event
+            "kills": self.kills_this_event,
+            "difficulty": self.difficulty_level
         }
 
     async def _lifecycle_loop(self):
@@ -84,8 +88,9 @@ class BossAI:
                 # 2. WARNING PHASE
                 self.state = "warning"
                 self.kills_this_event = 0
+                self.difficulty_level = await self._load_difficulty_level()
                 self.time_remaining = float(BOSS_WARNING_SEC)
-                logger.info(f"Tier {self.tier_id} Boss is waking up! Triggering warning notifications.")
+                logger.info(f"Tier {self.tier_id} Boss is waking up at difficulty {self.difficulty_level}. Triggering warning notifications.")
                 
                 # Create event in DB (via callback)
                 if asyncio.iscoroutinefunction(self.event_log_callback):
@@ -163,14 +168,18 @@ class BossAI:
         self.target_player = nearest_player
 
         if nearest_player:
+            speed = BOSS_SPEED * (1.0 + self.difficulty_level * 0.12)
+            kill_radius = BOSS_RADIUS * (1.0 + self.difficulty_level * 0.08)
+            still_seconds = max(1.5, BOSS_AFK_STILL_SECONDS - self.difficulty_level * 0.25)
+
             # Move towards target
             dx = nearest_player["x"] - self.x
             dy = nearest_player["y"] - self.y
             dist = (dx*dx + dy*dy) ** 0.5
             
             if dist > 0:
-                self.x += (dx / dist) * BOSS_SPEED * dt
-                self.y += (dy / dist) * BOSS_SPEED * dt
+                self.x += (dx / dist) * speed * dt
+                self.y += (dy / dist) * speed * dt
 
             # Check collision/kills for ALL players in range
             now = time.time()
@@ -179,7 +188,7 @@ class BossAI:
                 p_dy = p["y"] - self.y
                 p_dist = (p_dx*p_dx + p_dy*p_dy) ** 0.5
 
-                if p_dist < BOSS_RADIUS:
+                if p_dist < kill_radius:
                     # Player is inside boss touch zone.
                     # Condition: did they stay completely AFK / fails to react?
                     # "any player within 80px radius who hasn't moved in 5 seconds gets killed"
@@ -188,11 +197,11 @@ class BossAI:
                     # let's be strict: if they haven't moved in the last BOSS_AFK_STILL_SECONDS seconds, OR if they are stationary.
                     time_since_last_move = now - p.get("last_move_time", 0)
                     
-                    if time_since_last_move >= BOSS_AFK_STILL_SECONDS:
+                    if time_since_last_move >= still_seconds:
                         logger.info(f"Boss killed player {p['username']} (ID: {p['id']}) for being still/AFK inside kill radius.")
                         self.kills_this_event += 1
                         await self.kill_player_callback(p["id"], "boss")
-                    elif p_dist < (BOSS_RADIUS / 2): # Caught completely (dead center collision)
+                    elif p_dist < (kill_radius / 2): # Caught completely (dead center collision)
                         logger.info(f"Boss caught and killed player {p['username']} (ID: {p['id']}) on contact.")
                         self.kills_this_event += 1
                         await self.kill_player_callback(p["id"], "boss")
@@ -215,3 +224,14 @@ class BossAI:
             self.x += (dx / dist) * BOSS_SPEED * 0.1
             self.y += (dy / dist) * BOSS_SPEED * 0.1
             await asyncio.sleep(0.1)
+
+    async def _load_difficulty_level(self) -> int:
+        if not self.difficulty_callback:
+            return 0
+        try:
+            if asyncio.iscoroutinefunction(self.difficulty_callback):
+                return int(await self.difficulty_callback(self.tier_id))
+            return int(self.difficulty_callback(self.tier_id))
+        except Exception as e:
+            logger.error(f"Failed to load difficulty for Tier {self.tier_id}: {e}")
+            return 0

@@ -42,6 +42,7 @@ let selfX = WORLD_WIDTH / 2;
 let selfY = WORLD_HEIGHT / 2;
 let playersMap = new Map(); // id -> { username, x, y, is_alive }
 let bossState = { state: 'sleeping', x: 0, y: 0, targetX: 0, targetY: 0, time_remaining: 0, target_username: '' };
+let hazardZones = [];
 
 // Physics / Viewport
 let camX = selfX;
@@ -78,6 +79,9 @@ const btnLogout = document.getElementById('btn-logout');
 const btnExitGame = document.getElementById('btn-exit-game');
 
 const balanceValue = document.getElementById('balance-value');
+const premiumValue = document.getElementById('premium-value');
+const ticketsValue = document.getElementById('tickets-value');
+const shopProducts = document.getElementById('shop-products');
 const toastAlert = document.getElementById('status-toast');
 
 const deathOverlay = document.getElementById('death-overlay');
@@ -257,7 +261,11 @@ async function fetchLobbyData() {
         }
         if (profResp.ok) {
             userProfile = await profResp.json();
-            balanceValue.textContent = `$${userProfile.balance.toFixed(2)}`;
+            balanceValue.textContent = `${userProfile.balance.toFixed(2)} CR`;
+            ticketsValue.textContent = `${userProfile.chaos_tickets || 0} CHAOS`;
+            premiumValue.textContent = userProfile.is_premium ? 'PREMIUM' : 'STANDARD';
+            premiumValue.className = userProfile.is_premium ? 'premium-pill active' : 'premium-pill';
+            await fetchShopProducts();
         }
 
         // Fetch Tier Stats
@@ -265,7 +273,7 @@ async function fetchLobbyData() {
             const statsResp = await fetch(`${SERVER_API_URL}/tier-stats/${t}`);
             if (statsResp.ok) {
                 const stats = await statsResp.json();
-                document.getElementById(`t${t}-prize`).textContent = `Prize: $${stats.prize_pool.toFixed(2)}`;
+                document.getElementById(`t${t}-prize`).textContent = `Prize: ${stats.prize_pool.toFixed(2)} CR`;
                 document.getElementById(`t${t}-alive`).textContent = `Survivors: ${stats.alive} / ${stats.total}`;
                 
                 const bState = stats.boss_status ? stats.boss_status.state : 'sleeping';
@@ -276,6 +284,70 @@ async function fetchLobbyData() {
         }
     } catch (e) {
         console.error('Error fetching lobby states', e);
+    }
+}
+
+async function fetchShopProducts() {
+    if (!authToken || !shopProducts || shopProducts.children.length > 0) return;
+    try {
+        const resp = await fetch(`${SERVER_API_URL}/shop`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        shopProducts.innerHTML = '';
+        data.products.forEach(product => {
+            const item = document.createElement('div');
+            item.className = 'shop-product';
+            item.innerHTML = `
+                <div>
+                    <strong>${escapeHTML(product.title)}</strong>
+                    <span>${escapeHTML(product.description)}</span>
+                </div>
+                <button class="shop-buy" data-product="${escapeHTML(product.id)}">${product.stars} STARS</button>
+            `;
+            shopProducts.appendChild(item);
+        });
+
+        shopProducts.querySelectorAll('.shop-buy').forEach(btn => {
+            btn.addEventListener('click', () => buyShopProduct(btn.getAttribute('data-product')));
+        });
+    } catch (e) {
+        console.error('Error fetching shop products', e);
+    }
+}
+
+async function buyShopProduct(productId) {
+    try {
+        const resp = await fetch(`${SERVER_API_URL}/shop/stars-invoice`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ product_id: productId })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            showToast(data.detail || 'Payment unavailable', 'error');
+            return;
+        }
+
+        const tg = window.Telegram?.WebApp;
+        if (tg?.openInvoice) {
+            tg.openInvoice(data.invoice_link, async (status) => {
+                if (status === 'paid') {
+                    showToast('Payment confirmed', 'success');
+                    await fetchLobbyData();
+                } else if (status === 'failed') {
+                    showToast('Payment failed', 'error');
+                }
+            });
+        } else {
+            window.open(data.invoice_link, '_blank');
+        }
+    } catch (e) {
+        showToast('Payment connection failed', 'error');
     }
 }
 
@@ -291,7 +363,7 @@ btnDeposit.addEventListener('click', async () => {
         });
         if (resp.ok) {
             await fetchLobbyData();
-            showToast('+$10.00 deposited!', 'success');
+            showToast('+10 CR deposited', 'success');
         }
     } catch (e) {
         showToast('Connection failed', 'error');
@@ -343,6 +415,7 @@ function startWebGame(tier) {
     camX = selfX;
     camY = selfY;
     playersMap.clear();
+    hazardZones = [];
     particles = [];
     bossState = { state: 'sleeping', x: 0, y: 0, time_remaining: 0, target_username: '' };
 
@@ -425,6 +498,7 @@ function connectWebSocket() {
             bossState.targetY = data.boss.y;
             bossState.time_remaining = data.boss.time_remaining;
             bossState.target_username = data.boss.target_username;
+            bossState.difficulty = data.boss.difficulty || 0;
             
             // On first wake, snap position directly to target to avoid sliding from (0,0)
             if (bossState.x === 0 && bossState.y === 0) {
@@ -436,8 +510,11 @@ function connectWebSocket() {
         else if (mtype === 'chat_message') {
             addChatBubble(data.username, data.message);
         }
+        else if (mtype === 'hazard_list') {
+            hazardZones = data.hazards || [];
+        }
         else if (mtype === 'player_eliminated') {
-            addChatBubble('System', `${data.username} eliminated: ${data.reason === 'boss' ? 'Boss' : 'AFK'}`);
+            addChatBubble('System', `${data.username} eliminated: ${formatDeathReason(data.reason)}`);
         }
         else if (mtype === 'game_won') {
             triggerVictoryOverlay(data.prize);
@@ -732,7 +809,10 @@ function draw() {
     // 4. Draw Particles
     drawParticles(offsetX, offsetY);
 
-    // 5. Draw Other Players
+    // 5. Draw temporary hazard zones
+    drawHazards(offsetX, offsetY);
+
+    // 6. Draw Other Players
     playersMap.forEach(p => {
         if (p.is_alive) {
             drawCyberAvatar(p.x + offsetX, p.y + offsetY, COLORS.GRAY, false, p.username);
@@ -741,7 +821,7 @@ function draw() {
         }
     });
 
-    // 6. Draw Self
+    // 7. Draw Self
     const selfAlive = !deathOverlay.classList.contains('hidden');
     if (!selfAlive) {
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
@@ -749,12 +829,12 @@ function draw() {
         drawTombstone(selfX + offsetX, selfY + offsetY);
     }
 
-    // 7. Draw Boss AI Void Creature
+    // 8. Draw Boss AI Void Creature
     if (bossState.state !== 'sleeping') {
         drawBoss(bossState.x + offsetX, bossState.y + offsetY);
     }
 
-    // 8. Draw Minimap Overlay
+    // 9. Draw Minimap Overlay
     drawMinimap();
 }
 
@@ -961,6 +1041,22 @@ function drawBoss(x, y) {
     ctx.beginPath(); ctx.arc(x + eyeOffset, y - 4, eyeSize, 0, Math.PI*2); ctx.fill();
 }
 
+function drawHazards(ox, oy) {
+    const t = Date.now() / 1000;
+    hazardZones.forEach(h => {
+        const pulse = 0.75 + Math.sin(t * 5 + h.id) * 0.15;
+        ctx.beginPath();
+        ctx.arc(h.x + ox, h.y + oy, h.radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(204, 0, 0, 0.12)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(204, 0, 0, 0.65)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 8]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    });
+}
+
 // ─── RADAR MINIMAP OVERLAY ───
 function drawMinimap() {
     const mapSize = 120;
@@ -1091,7 +1187,8 @@ function updateBossHUD() {
     } else if (bossState.state === 'hunting') {
         title.textContent = '⚠️ WARNING: BOSS ACTIVE & HUNTING!';
         title.style.color = '#fff';
-        subtitle.textContent = bossState.target_username ? `CURRENT TARGET: ${bossState.target_username.toUpperCase()}` : 'SEEKING VICTIMS';
+        const diff = bossState.difficulty ? ` | THREAT ${bossState.difficulty}` : '';
+        subtitle.textContent = bossState.target_username ? `CURRENT TARGET: ${bossState.target_username.toUpperCase()}${diff}` : `SEEKING VICTIMS${diff}`;
         banner.classList.remove('hidden');
     } else {
         banner.classList.add('hidden');
@@ -1127,15 +1224,23 @@ function triggerDeathOverlay(reason) {
     
     let text = 'Eliminated by the Boss.';
     if (reason === 'afk') text = 'Eliminated: Failed AFK daily moves quota.';
+    else if (reason === 'hazard') text = 'Eliminated: Stood inside a danger zone.';
     else if (reason === 'kicked') text = 'Logged in from another location.';
 
     deathReason.textContent = text;
     deathOverlay.classList.remove('hidden');
 }
 
+function formatDeathReason(reason) {
+    if (reason === 'boss') return 'Boss';
+    if (reason === 'afk') return 'AFK';
+    if (reason === 'hazard') return 'Hazard';
+    return reason || 'Unknown';
+}
+
 function triggerVictoryOverlay(prize) {
     if (wsConn) wsConn.close();
-    victoryPrize.textContent = `$${prize.toFixed(2)}`;
+    victoryPrize.textContent = `${prize.toFixed(2)} CR`;
     victoryOverlay.classList.remove('hidden');
 }
 

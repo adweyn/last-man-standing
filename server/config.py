@@ -41,6 +41,14 @@ BOSS_HUNT_SECONDS: int = 60              # How long the boss actively hunts
 BOSS_KILL_RADIUS: int = 80               # Pixels: boss kill radius
 BOSS_IDLE_SECONDS: float = 5.0           # Seconds without movement = AFK kill
 
+# Difficulty director
+DIFFICULTY_MAX_LEVEL: int = int(os.getenv("DIFFICULTY_MAX_LEVEL", "8"))
+DIFFICULTY_LEVEL_PER_SURVIVOR_DAY: float = float(os.getenv("DIFFICULTY_LEVEL_PER_SURVIVOR_DAY", "0.75"))
+DIFFICULTY_TIER_BONUS: dict[int, int] = {1: 0, 2: 1, 3: 2}
+HAZARD_MAX_PER_TIER: int = int(os.getenv("HAZARD_MAX_PER_TIER", "10"))
+HAZARD_TICK_INTERVAL: float = float(os.getenv("HAZARD_TICK_INTERVAL", "0.5"))
+HAZARD_DAMAGE_STILL_SECONDS: float = float(os.getenv("HAZARD_DAMAGE_STILL_SECONDS", "2.5"))
+
 # ---------------------------------------------------------------------------
 # Movement / world
 # ---------------------------------------------------------------------------
@@ -81,6 +89,48 @@ FCM_API_URL: str = "https://fcm.googleapis.com/fcm/send"
 # ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")  # None -> Bot disabled
 TELEGRAM_MINI_APP_URL: str = os.getenv("TELEGRAM_MINI_APP_URL", "http://localhost:8000/telegram-app")
+ALLOW_MOCK_PAYMENTS: bool = os.getenv("ALLOW_MOCK_PAYMENTS", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# Monetization
+# ---------------------------------------------------------------------------
+# Real-money payments should buy digital goods only. Tournament entries and
+# rewards remain internal credits to avoid mixing player-funded cash prizes with
+# random elimination mechanics.
+SHOP_PRODUCTS: dict[str, dict] = {
+    "credits_25": {
+        "title": "25 Credits",
+        "description": "Adds 25 internal tournament credits.",
+        "stars": 25,
+        "grant_credits": 25.0,
+        "grant_chaos_tickets": 0,
+        "premium_days": 0,
+    },
+    "credits_120": {
+        "title": "120 Credits",
+        "description": "Adds 120 internal tournament credits.",
+        "stars": 99,
+        "grant_credits": 120.0,
+        "grant_chaos_tickets": 0,
+        "premium_days": 0,
+    },
+    "chaos_ticket_3": {
+        "title": "3 Chaos Tickets",
+        "description": "Unlocks optional No Mercy rooms when available.",
+        "stars": 39,
+        "grant_credits": 0.0,
+        "grant_chaos_tickets": 3,
+        "premium_days": 0,
+    },
+    "season_pass_30": {
+        "title": "30 Day Season Pass",
+        "description": "Premium status, event access, and starter credits.",
+        "stars": 149,
+        "grant_credits": 30.0,
+        "grant_chaos_tickets": 2,
+        "premium_days": 30,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Auth / security

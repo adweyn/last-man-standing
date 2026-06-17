@@ -67,6 +67,42 @@ This runs the REST API on `http://localhost:8000` and the WebSocket game loop on
 
 ---
 
+## Telegram / Render Monetization Notes
+
+The Telegram Mini App now separates real payments from the in-game tournament
+economy:
+
+- Real payments create Telegram Stars (`XTR`) invoices through `/shop/stars-invoice`.
+- The Telegram bot validates `pre_checkout_query` updates and fulfills
+  `successful_payment` updates.
+- Paid products grant internal credits, Chaos tickets, or premium time.
+- Tournament entry fees and prize pools remain internal credits (`CR`), not cash.
+
+For Render production, set these environment variables:
+
+```ini
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_MINI_APP_URL=https://your-render-app.onrender.com/telegram-app
+SECRET_KEY=replace_with_a_long_random_secret
+ALLOW_MOCK_PAYMENTS=false
+DATABASE_URL=lms.db
+```
+
+During local testing only, set `ALLOW_MOCK_PAYMENTS=true` if you still want the
+old mock deposit button to work.
+
+The danger system also has tunable variables:
+
+```ini
+DIFFICULTY_MAX_LEVEL=8
+DIFFICULTY_LEVEL_PER_SURVIVOR_DAY=0.75
+HAZARD_MAX_PER_TIER=10
+HAZARD_TICK_INTERVAL=0.5
+HAZARD_DAMAGE_STILL_SECONDS=2.5
+```
+
+---
+
 ### 2. Client Setup
 Navigate to the `client/` directory, activate the environment (or share the environment), install requirements, and run the client launcher:
 

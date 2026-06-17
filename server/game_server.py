@@ -16,7 +16,10 @@ from websockets.exceptions import ConnectionClosed
 from config import (
     SERVER_HOST, WS_PORT, SECRET_KEY, JWT_ALGORITHM,
     WORLD_WIDTH, WORLD_HEIGHT, PLAYER_SPEED,
-    PLAYER_LIST_INTERVAL, BOSS_UPDATE_INTERVAL
+    PLAYER_LIST_INTERVAL, BOSS_UPDATE_INTERVAL,
+    CRYSTAL_SPAWN_INTERVAL, CRYSTAL_MAX_PER_TIER,
+    CRYSTAL_MIN_VALUE, CRYSTAL_MAX_VALUE, CRYSTAL_SPAWN_RADIUS,
+    HAZARD_MAX_PER_TIER, HAZARD_TICK_INTERVAL, HAZARD_DAMAGE_STILL_SECONDS
 )
 import database
 import notifications
@@ -26,6 +29,16 @@ logger = logging.getLogger(__name__)
 # Active client connections grouped by tier:
 # { tier_id: { websocket_conn: { player_id, username, x, y, last_move_time, is_alive } } }
 tier_connections: Dict[int, Dict[Any, Dict[str, Any]]] = {1: {}, 2: {}, 3: {}}
+
+# Active crystals spawned on the map per tier:
+# { tier_id: [ { id: int, x: float, y: float, value: float } ] }
+tier_crystals: Dict[int, list] = {1: [], 2: [], 3: []}
+crystal_id_counter = 0
+
+# Active danger zones per tier:
+# { tier_id: [ { id, x, y, radius, expires_at } ] }
+tier_hazards: Dict[int, list] = {1: [], 2: [], 3: []}
+hazard_id_counter = 0
 
 # Global reference to BossAI instances per tier. Set during startup.
 boss_instances: Dict[int, Any] = {}
@@ -224,6 +237,17 @@ async def handle_connection(websocket, path=None):
             "world_height": WORLD_HEIGHT
         }))
 
+        # Send active crystals list to new player
+        await websocket.send(json.dumps({
+            "type": "crystal_list",
+            "crystals": tier_crystals[tier_id]
+        }))
+
+        await websocket.send(json.dumps({
+            "type": "hazard_list",
+            "hazards": tier_hazards[tier_id]
+        }))
+
         # 4. RECEIVE LOOP
         async for msg_str in websocket:
             try:
@@ -265,12 +289,48 @@ async def handle_connection(websocket, path=None):
                         continue
 
                 # Update memory
+                dx_actual = new_x - client_info["x"]
+                dy_actual = new_y - client_info["y"]
+                dist_actual = (dx_actual * dx_actual + dy_actual * dy_actual) ** 0.5
+
                 client_info["x"] = new_x
                 client_info["y"] = new_y
                 client_info["last_move_time"] = now
 
                 # Log to daily_activity DB
                 await database.log_movement(player_id, new_x, new_y)
+
+                # Increment explorer daily quest progress (distance traveled)
+                if dist_actual > 0:
+                    asyncio.create_task(database.increment_quest_progress(player_id, "explorer", dist_actual))
+
+                # Check collision with crystals
+                collected_crystals = []
+                for crystal in tier_crystals[tier_id]:
+                    # Check collision (player radius 12 + crystal radius 15 = 27px)
+                    c_dist = ((new_x - crystal["x"]) ** 2 + (new_y - crystal["y"]) ** 2) ** 0.5
+                    if c_dist < 24.0:  # slightly smaller than theoretical for better visual feel
+                        collected_crystals.append(crystal)
+                
+                for crystal in collected_crystals:
+                    tier_crystals[tier_id].remove(crystal)
+                    # Award balance
+                    await database.update_balance(player_id, crystal["value"])
+                    # Increment scavenger daily quest progress
+                    await database.increment_quest_progress(player_id, "scavenger", 1.0)
+                    # Broadcast collection event to room
+                    await broadcast_to_tier(tier_id, {
+                        "type": "crystal_collected",
+                        "crystal_id": crystal["id"],
+                        "player_id": player_id,
+                        "username": username,
+                        "value": crystal["value"]
+                    })
+                    # Broadcast updated crystal list
+                    await broadcast_to_tier(tier_id, {
+                        "type": "crystal_list",
+                        "crystals": tier_crystals[tier_id]
+                    })
 
             elif msg_type == "chat":
                 chat_text = str(msg.get("message", ""))[:120].strip()
@@ -351,5 +411,154 @@ async def start_websocket_server():
         # Run local loops
         await asyncio.gather(
             player_broadcast_loop(),
-            boss_broadcast_loop()
+            boss_broadcast_loop(),
+            crystal_spawner_loop(),
+            hazard_director_loop(),
+            quest_survivor_loop()
         )
+
+
+import math
+import random
+
+def get_obstacles() -> list[dict]:
+    """Generates the same deterministic obstacles list as the web client."""
+    obstacles = []
+    for i in range(40):
+        seed_val = math.sin(i * 927.32) * 1000
+        ox = 150.0 + abs(seed_val % (WORLD_WIDTH - 300))
+        oy = 150.0 + abs((seed_val * 1.5) % (WORLD_HEIGHT - 300))
+        rad = 25.0 + abs((seed_val * 2.3) % 25)
+
+        cx = WORLD_WIDTH / 2
+        cy = WORLD_HEIGHT / 2
+        dist = ((ox - cx) ** 2 + (oy - cy) ** 2) ** 0.5
+        if dist > 200:
+            obstacles.append({"x": ox, "y": oy, "rad": rad})
+    return obstacles
+
+
+async def spawn_crystal(tier_id: int, obstacles: list[dict]):
+    """Finds a clean spot and spawns a collectible crystal in a tier room."""
+    global crystal_id_counter
+    for _ in range(10):  # 10 attempts to find clean coordinate
+        x = float(random.randint(100, WORLD_WIDTH - 100))
+        y = float(random.randint(100, WORLD_HEIGHT - 100))
+        
+        # Check collision with obstacles
+        collides = False
+        for obs in obstacles:
+            dist = ((x - obs["x"]) ** 2 + (y - obs["y"]) ** 2) ** 0.5
+            if dist < obs["rad"] + CRYSTAL_SPAWN_RADIUS + 10:
+                collides = True
+                break
+        
+        if not collides:
+            crystal_id_counter += 1
+            val = round(random.uniform(CRYSTAL_MIN_VALUE, CRYSTAL_MAX_VALUE), 2)
+            crystal = {
+                "id": crystal_id_counter,
+                "x": x,
+                "y": y,
+                "value": val
+            }
+            tier_crystals[tier_id].append(crystal)
+            
+            # Broadcast the updated list
+            await broadcast_to_tier(tier_id, {
+                "type": "crystal_list",
+                "crystals": tier_crystals[tier_id]
+            })
+            break
+
+
+async def crystal_spawner_loop():
+    """Periodically spawns crystals in active rooms."""
+    obstacles = get_obstacles()
+    while True:
+        try:
+            await asyncio.sleep(CRYSTAL_SPAWN_INTERVAL)
+            for tier_id in [1, 2, 3]:
+                if not tier_connections[tier_id]:
+                    if tier_crystals[tier_id]:
+                        tier_crystals[tier_id] = []
+                    continue
+                
+                if len(tier_crystals[tier_id]) < CRYSTAL_MAX_PER_TIER:
+                    await spawn_crystal(tier_id, obstacles)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in crystal spawner loop: {e}", exc_info=True)
+
+
+async def quest_survivor_loop():
+    """Periodically increments survivor quest progress for active, alive players."""
+    while True:
+        try:
+            await asyncio.sleep(5)
+            for tier_id in [1, 2, 3]:
+                for client in list(tier_connections[tier_id].values()):
+                    if client["is_alive"]:
+                        asyncio.create_task(
+                            database.increment_quest_progress(client["player_id"], "survivor", 5.0)
+                        )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in quest survivor loop: {e}", exc_info=True)
+
+
+async def hazard_director_loop():
+    """Spawns and enforces temporary danger zones during hard boss hunts."""
+    global hazard_id_counter
+    while True:
+        try:
+            await asyncio.sleep(HAZARD_TICK_INTERVAL)
+            now = time.time()
+            for tier_id in [1, 2, 3]:
+                boss = boss_instances.get(tier_id)
+                difficulty = int(getattr(boss, "difficulty_level", 0) or 0) if boss else 0
+                active_hunt = bool(boss and boss.state == "hunting")
+
+                before_count = len(tier_hazards[tier_id])
+                tier_hazards[tier_id] = [h for h in tier_hazards[tier_id] if h["expires_at"] > now]
+                changed = before_count != len(tier_hazards[tier_id])
+
+                if active_hunt and difficulty >= 2 and tier_connections[tier_id]:
+                    target_count = min(HAZARD_MAX_PER_TIER, 1 + difficulty)
+                    if len(tier_hazards[tier_id]) < target_count and random.random() < 0.45:
+                        hazard_id_counter += 1
+                        tier_hazards[tier_id].append({
+                            "id": hazard_id_counter,
+                            "x": float(random.randint(120, WORLD_WIDTH - 120)),
+                            "y": float(random.randint(120, WORLD_HEIGHT - 120)),
+                            "radius": float(70 + difficulty * 12),
+                            "expires_at": now + random.uniform(12, 24),
+                        })
+                        changed = True
+
+                    for client in list(tier_connections[tier_id].values()):
+                        if not client["is_alive"]:
+                            continue
+                        if now - client.get("last_move_time", 0) < HAZARD_DAMAGE_STILL_SECONDS:
+                            continue
+                        for hazard in tier_hazards[tier_id]:
+                            dist = ((client["x"] - hazard["x"]) ** 2 + (client["y"] - hazard["y"]) ** 2) ** 0.5
+                            if dist < hazard["radius"]:
+                                await kill_player_in_game(client["player_id"], tier_id, "hazard")
+                                break
+
+                elif not active_hunt and tier_hazards[tier_id]:
+                    tier_hazards[tier_id] = []
+                    changed = True
+
+                if changed:
+                    await broadcast_to_tier(tier_id, {
+                        "type": "hazard_list",
+                        "hazards": tier_hazards[tier_id]
+                    })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in hazard director loop: {e}", exc_info=True)

@@ -236,6 +236,87 @@ header {
     font-weight: 900;
 }
 
+.premium-pill {
+    display: inline-flex;
+    justify-content: center;
+    margin-top: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-gray);
+    border-radius: 6px;
+    color: var(--text-gray);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.premium-pill.active {
+    color: #000;
+    background: #fff;
+    border-color: #fff;
+}
+
+.shop-panel {
+    border: 1px solid var(--border-gray);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+    background: rgba(12, 12, 12, 0.65);
+}
+
+.shop-head {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-gray);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.shop-products {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.shop-product {
+    display: grid;
+    grid-template-columns: 1fr 94px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid rgba(55,55,55,0.55);
+    border-radius: 6px;
+    background: rgba(30, 30, 30, 0.38);
+}
+
+.shop-product strong,
+.shop-product span {
+    display: block;
+}
+
+.shop-product strong {
+    font-size: 0.78rem;
+}
+
+.shop-product span {
+    margin-top: 2px;
+    color: var(--text-gray);
+    font-size: 0.62rem;
+    line-height: 1.25;
+}
+
+.shop-buy {
+    height: 34px;
+    border: 1px solid #fff;
+    border-radius: 6px;
+    background: #fff;
+    color: #000;
+    font-weight: 800;
+    font-size: 0.64rem;
+    cursor: pointer;
+}
+
 .tier-cards {
     display: flex;
     flex-direction: column;

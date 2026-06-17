@@ -16,7 +16,10 @@ import os
 
 import re
 
-from config import SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_HOURS, TIERS
+from config import (
+    SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_HOURS, TIERS,
+    TELEGRAM_BOT_TOKEN, SHOP_PRODUCTS, ALLOW_MOCK_PAYMENTS
+)
 import database
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +106,12 @@ class TelegramAuthSchema(BaseModel):
     init_data: Optional[str] = None
     username: Optional[str] = Field(None, max_length=30)
 
+class ClaimQuestSchema(BaseModel):
+    quest_type: str = Field(..., pattern="^(explorer|survivor|scavenger)$")
+
+class ShopInvoiceSchema(BaseModel):
+    product_id: str
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers & Dependencies
@@ -178,6 +187,8 @@ import hmac
 import hashlib
 import urllib.parse
 import json
+import uuid
+import aiohttp
 
 def verify_telegram_init_data(init_data: str, bot_token: str) -> Optional[dict]:
     try:
@@ -287,6 +298,9 @@ async def get_profile(player: dict = Depends(get_current_player)):
         "username": player["username"],
         "email": player["email"],
         "balance": round(player["balance"], 2),
+        "premium_until": player.get("premium_until", 0),
+        "is_premium": float(player.get("premium_until", 0) or 0) > datetime.now(timezone.utc).timestamp(),
+        "chaos_tickets": player.get("chaos_tickets", 0),
         "fcm_registered": bool(player["fcm_token"]),
         "active_session": active_session,
         "daily_moves_today": daily_moves
@@ -296,8 +310,62 @@ async def get_profile(player: dict = Depends(get_current_player)):
 @app.post("/deposit")
 async def deposit(deposit_form: DepositSchema, player: dict = Depends(get_current_player)):
     """Add mock funds to play tiered levels."""
+    if not ALLOW_MOCK_PAYMENTS:
+        raise HTTPException(
+            status_code=403,
+            detail="Mock deposits are disabled. Use the Telegram Stars shop."
+        )
     await database.update_balance(player["id"], deposit_form.amount)
     return {"message": "Deposit successful", "new_balance": round(player["balance"] + deposit_form.amount, 2)}
+
+
+@app.get("/shop")
+async def get_shop(player: dict = Depends(get_current_player)):
+    products = []
+    for product_id, product in SHOP_PRODUCTS.items():
+        products.append({
+            "id": product_id,
+            "title": product["title"],
+            "description": product["description"],
+            "stars": product["stars"],
+            "grant_credits": product.get("grant_credits", 0.0),
+            "grant_chaos_tickets": product.get("grant_chaos_tickets", 0),
+            "premium_days": product.get("premium_days", 0),
+        })
+    return {"currency": "XTR", "products": products}
+
+
+@app.post("/shop/stars-invoice")
+async def create_stars_invoice(form: ShopInvoiceSchema, player: dict = Depends(get_current_player)):
+    product = SHOP_PRODUCTS.get(form.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Unknown product")
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "CHANGE_ME" or not TELEGRAM_BOT_TOKEN.strip():
+        raise HTTPException(status_code=503, detail="Telegram payments are not configured")
+
+    payload = json.dumps({
+        "order": uuid.uuid4().hex,
+        "player_id": player["id"],
+        "product_id": form.product_id,
+    }, separators=(",", ":"))
+    await database.create_payment_order(player["id"], form.product_id, int(product["stars"]), payload)
+
+    invoice_payload = {
+        "title": product["title"],
+        "description": product["description"],
+        "payload": payload,
+        "currency": "XTR",
+        "prices": [{"label": product["title"], "amount": int(product["stars"])}],
+    }
+
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/createInvoiceLink"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(api_url, json=invoice_payload) as resp:
+            data = await resp.json()
+            if not data.get("ok"):
+                raise HTTPException(status_code=502, detail=data.get("description", "Telegram invoice failed"))
+
+    return {"invoice_link": data["result"], "product_id": form.product_id}
 
 
 @app.post("/join-tier")
@@ -397,6 +465,32 @@ async def get_leaderboard():
             return [dict(r) for r in rows]
 
 
+@app.get("/quests")
+async def get_quests(player: dict = Depends(get_current_player)):
+    """Fetches daily quests and progress for the authenticated player."""
+    quests = await database.get_daily_quests(player["id"])
+    return quests
+
+
+@app.post("/quests/claim")
+async def claim_quest(form: ClaimQuestSchema, player: dict = Depends(get_current_player)):
+    """Verifies completions, flags the quest as claimed, and pays the reward to the player's balance."""
+    reward = await database.claim_quest_reward(player["id"], form.quest_type)
+    if reward is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quest is not complete or reward has already been claimed."
+        )
+    
+    # Fetch updated profile for new balance
+    refreshed = await database.get_player_by_id(player["id"])
+    return {
+        "message": f"Successfully claimed reward of ${reward:.2f}!",
+        "reward": reward,
+        "new_balance": round(refreshed["balance"], 2)
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # WebSocket Endpoint (FastAPI Wrapper for game_server)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,4 +536,3 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     wrapper = FastAPIWebSocketWrapper(websocket)
     await game_server.handle_connection(wrapper)
-

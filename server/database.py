@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS players (
     fcm_token   TEXT,
     created_at  REAL    NOT NULL DEFAULT (unixepoch()),
     balance     REAL    NOT NULL DEFAULT 0.0,
-    telegram_id INTEGER UNIQUE
+    telegram_id INTEGER UNIQUE,
+    premium_until REAL NOT NULL DEFAULT 0,
+    chaos_tickets INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tier_sessions (
@@ -65,6 +67,29 @@ CREATE TABLE IF NOT EXISTS boss_events (
     kills_count INTEGER NOT NULL DEFAULT 0,
     status      TEXT    NOT NULL DEFAULT 'warning'  -- warning | hunting | done
 );
+
+CREATE TABLE IF NOT EXISTS player_quests (
+    player_id   INTEGER NOT NULL REFERENCES players(id),
+    date        TEXT    NOT NULL,  -- YYYY-MM-DD
+    quest_type  TEXT    NOT NULL,  -- 'explorer' | 'survivor' | 'scavenger'
+    progress    REAL    NOT NULL DEFAULT 0.0,
+    target      REAL    NOT NULL,
+    reward      REAL    NOT NULL,
+    is_claimed  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (player_id, date, quest_type)
+);
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id   INTEGER NOT NULL REFERENCES players(id),
+    product_id  TEXT    NOT NULL,
+    stars       INTEGER NOT NULL,
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    payload     TEXT    NOT NULL UNIQUE,
+    telegram_payment_charge_id TEXT,
+    created_at  REAL    NOT NULL DEFAULT (unixepoch()),
+    paid_at     REAL
+);
 """
 
 
@@ -79,6 +104,15 @@ async def init_db() -> None:
             await db.commit()
         except sqlite3.OperationalError:
             pass
+        for sql in (
+            "ALTER TABLE players ADD COLUMN premium_until REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE players ADD COLUMN chaos_tickets INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                await db.execute(sql)
+                await db.commit()
+            except sqlite3.OperationalError:
+                pass
     logger.info("Database initialised at %s", DATABASE_URL)
 
 
@@ -173,6 +207,87 @@ async def update_balance(player_id: int, delta: float) -> None:
         await db.commit()
 
 
+# ---------------------------------------------------------------------------
+# Payments / digital goods
+# ---------------------------------------------------------------------------
+
+async def create_payment_order(player_id: int, product_id: str, stars: int, payload: str) -> int:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        cur = await db.execute(
+            """INSERT INTO payment_orders (player_id, product_id, stars, payload)
+               VALUES (?, ?, ?, ?)""",
+            (player_id, product_id, stars, payload),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_payment_order_by_payload(payload: str) -> Optional[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM payment_orders WHERE payload=?", (payload,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def fulfill_payment_order(payload: str, telegram_charge_id: str, product: dict) -> Optional[dict]:
+    """
+    Mark a Stars order as paid and grant the configured digital goods exactly once.
+    Returns the updated player row, or None if the payload is unknown.
+    """
+    now = time.time()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM payment_orders WHERE payload=?", (payload,)
+        ) as cur:
+            order = await cur.fetchone()
+            if not order:
+                return None
+
+        order = dict(order)
+        if order["status"] == "paid":
+            async with db.execute("SELECT * FROM players WHERE id=?", (order["player_id"],)) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+        premium_days = int(product.get("premium_days", 0))
+        premium_until = 0.0
+        if premium_days > 0:
+            async with db.execute("SELECT premium_until FROM players WHERE id=?", (order["player_id"],)) as cur:
+                row = await cur.fetchone()
+                current_until = float(row[0] or 0) if row else 0.0
+            premium_until = max(current_until, now) + premium_days * 86400
+
+        await db.execute(
+            """UPDATE payment_orders
+               SET status='paid', telegram_payment_charge_id=?, paid_at=?
+               WHERE id=? AND status='pending'""",
+            (telegram_charge_id, now, order["id"]),
+        )
+        await db.execute(
+            """UPDATE players
+               SET balance=balance+?,
+                   chaos_tickets=chaos_tickets+?,
+                   premium_until=CASE WHEN ? > 0 THEN ? ELSE premium_until END
+               WHERE id=?""",
+            (
+                float(product.get("grant_credits", 0.0)),
+                int(product.get("grant_chaos_tickets", 0)),
+                premium_days,
+                premium_until,
+                order["player_id"],
+            ),
+        )
+        await db.commit()
+
+        async with db.execute("SELECT * FROM players WHERE id=?", (order["player_id"],)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier sessions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,6 +365,25 @@ async def get_tier_stats(tier_id: int) -> dict:
         "alive": row["alive"] or 0,
         "prize_pool": prize_pool,
     }
+
+
+async def get_tier_difficulty_level(tier_id: int) -> int:
+    """Calculate a persistent pressure level from tier and survivor age."""
+    from config import DIFFICULTY_MAX_LEVEL, DIFFICULTY_LEVEL_PER_SURVIVOR_DAY, DIFFICULTY_TIER_BONUS
+    now = time.time()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        async with db.execute(
+            "SELECT entry_time FROM tier_sessions WHERE tier_id=? AND is_alive=1",
+            (tier_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        return int(DIFFICULTY_TIER_BONUS.get(tier_id, 0))
+
+    oldest_days = max((now - float(row[0])) / 86400.0 for row in rows)
+    level = int(DIFFICULTY_TIER_BONUS.get(tier_id, 0) + oldest_days * DIFFICULTY_LEVEL_PER_SURVIVOR_DAY)
+    return max(0, min(DIFFICULTY_MAX_LEVEL, level))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -370,3 +504,95 @@ async def get_active_boss_event(tier_id: int) -> Optional[dict]:
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Daily Quests Play-to-Earn logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def init_daily_quests(player_id: int) -> None:
+    """Initialize 3 daily quests for a player on the current day if not present."""
+    from config import (
+        QUEST_EXPLORER_TARGET, QUEST_EXPLORER_REWARD,
+        QUEST_SURVIVOR_TARGET, QUEST_SURVIVOR_REWARD,
+        QUEST_SCAVENGER_TARGET, QUEST_SCAVENGER_REWARD
+    )
+    today = date.today().isoformat()
+    quests = [
+        ("explorer", QUEST_EXPLORER_TARGET, QUEST_EXPLORER_REWARD),
+        ("survivor", QUEST_SURVIVOR_TARGET, QUEST_SURVIVOR_REWARD),
+        ("scavenger", QUEST_SCAVENGER_TARGET, QUEST_SCAVENGER_REWARD)
+    ]
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        for q_type, target, reward in quests:
+            try:
+                await db.execute(
+                    """INSERT INTO player_quests (player_id, date, quest_type, progress, target, reward, is_claimed)
+                       VALUES (?, ?, ?, 0.0, ?, ?, 0)""",
+                    (player_id, today, q_type, target, reward)
+                )
+            except aiosqlite.IntegrityError:
+                # Already exists, skip
+                pass
+        await db.commit()
+
+
+async def get_daily_quests(player_id: int) -> list[dict]:
+    """Fetches daily quests and progress for a player. Auto-initializes if not present."""
+    await init_daily_quests(player_id)
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM player_quests WHERE player_id=? AND date=?", (player_id, today)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def increment_quest_progress(player_id: int, quest_type: str, amount: float) -> None:
+    """Increments a quest's progress. Safely handles floating-point math."""
+    await init_daily_quests(player_id)
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """UPDATE player_quests
+               SET progress = MIN(target, progress + ?)
+               WHERE player_id=? AND date=? AND quest_type=? AND is_claimed=0""",
+            (amount, player_id, today, quest_type)
+        )
+        await db.commit()
+
+
+async def claim_quest_reward(player_id: int, quest_type: str) -> Optional[float]:
+    """
+    Checks if a quest is complete. If so, updates status to claimed and adds the
+    reward directly to player balance. Returns reward amount or None.
+    """
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM player_quests WHERE player_id=? AND date=? AND quest_type=?",
+            (player_id, today, quest_type)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            quest = dict(row)
+
+        if quest["progress"] >= quest["target"] and not quest["is_claimed"]:
+            # Perform atomic update
+            await db.execute(
+                "UPDATE player_quests SET is_claimed=1 WHERE player_id=? AND date=? AND quest_type=?",
+                (player_id, today, quest_type)
+            )
+            # Add money to player balance
+            await db.execute(
+                "UPDATE players SET balance=balance+? WHERE id=?",
+                (quest["reward"], player_id)
+            )
+            await db.commit()
+            return quest["reward"]
+
+    return None

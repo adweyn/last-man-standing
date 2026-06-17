@@ -51,8 +51,17 @@
         <!-- ─── LOBBY / TIER SELECTION SCREEN ─── -->
         <section id="screen-lobby" class="panel hidden">
             <div class="balance-container">
-                <span class="balance-label">ACCOUNT BALANCE</span>
-                <span id="balance-value" class="balance-amount">$0.00</span>
+                <span class="balance-label">CREDIT BALANCE</span>
+                <span id="balance-value" class="balance-amount">0 CR</span>
+                <span id="premium-value" class="premium-pill">STANDARD</span>
+            </div>
+
+            <div id="shop-panel" class="shop-panel">
+                <div class="shop-head">
+                    <span>STARS SHOP</span>
+                    <span id="tickets-value">0 CHAOS</span>
+                </div>
+                <div id="shop-products" class="shop-products"></div>
             </div>
 
             <div class="tier-cards">
@@ -60,10 +69,10 @@
                 <div class="tier-card" data-tier="1">
                     <h3>TIER I</h3>
                     <p class="desc">Entry Level</p>
-                    <span class="fee">$1</span>
+                    <span class="fee">1 CR</span>
                     <hr>
                     <div class="card-stats">
-                        <span class="prize" id="t1-prize">Prize: $0.00</span>
+                        <span class="prize" id="t1-prize">Prize: 0 CR</span>
                         <span class="survivors" id="t1-alive">Survivors: 0 / 0</span>
                         <span class="boss-status" id="t1-boss">Boss: SLEEPING</span>
                     </div>
@@ -73,10 +82,10 @@
                 <div class="tier-card" data-tier="2">
                     <h3>TIER II</h3>
                     <p class="desc">Standard</p>
-                    <span class="fee">$5</span>
+                    <span class="fee">5 CR</span>
                     <hr>
                     <div class="card-stats">
-                        <span class="prize" id="t2-prize">Prize: $0.00</span>
+                        <span class="prize" id="t2-prize">Prize: 0 CR</span>
                         <span class="survivors" id="t2-alive">Survivors: 0 / 0</span>
                         <span class="boss-status" id="t2-boss">Boss: SLEEPING</span>
                     </div>
@@ -86,10 +95,10 @@
                 <div class="tier-card" data-tier="3">
                     <h3>TIER III</h3>
                     <p class="desc">High Stakes</p>
-                    <span class="fee">$10</span>
+                    <span class="fee">10 CR</span>
                     <hr>
                     <div class="card-stats">
-                        <span class="prize" id="t3-prize">Prize: $0.00</span>
+                        <span class="prize" id="t3-prize">Prize: 0 CR</span>
                         <span class="survivors" id="t3-alive">Survivors: 0 / 0</span>
                         <span class="boss-status" id="t3-boss">Boss: SLEEPING</span>
                     </div>
@@ -97,7 +106,8 @@
             </div>
 
             <div class="lobby-controls">
-                <button id="btn-deposit" class="btn secondary">+$10.00 DEPOSIT (MOCK)</button>
+                <button id="btn-quests" class="btn primary glow" style="margin-bottom: 15px; width: 100%;">📋 DAILY QUESTS</button>
+                <button id="btn-deposit" class="btn secondary">+10 CR MOCK DEPOSIT</button>
                 <button id="btn-logout" class="btn link">LOGOUT</button>
             </div>
         </section>
@@ -111,7 +121,7 @@
                 <!-- HUD overlays -->
                 <div id="hud-top-left" class="hud-panel">
                     <span id="hud-tier">TIER 1</span>
-                    <span id="hud-prize" class="gold">$0.00</span>
+                    <span id="hud-prize" class="gold">0 CR</span>
                 </div>
 
                 <div id="hud-top-right" class="hud-panel">
@@ -165,7 +175,7 @@
     <div id="victory-overlay" class="fullscreen-overlay hidden">
         <h1 class="logo text-yellow">VICTORY</h1>
         <p class="overlay-text">You are the Last Man Standing!</p>
-        <p id="victory-prize" class="overlay-prize">$0.00</p>
+        <p id="victory-prize" class="overlay-prize">0 CR</p>
         <button id="btn-victory-exit" class="btn primary">CLAIM REWARD</button>
     </div>
 
