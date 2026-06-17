@@ -141,6 +141,7 @@ async def get_current_player(credentials: HTTPAuthorizationCredentials = Depends
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
+@app.get("/healthz")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
 
