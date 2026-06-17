@@ -529,15 +529,15 @@ header {
 }
 
 .objective-tip {
-    top: 64px;
+    top: 104px;
     left: 15px;
-    max-width: 172px;
+    max-width: 150px;
     gap: 3px;
-    opacity: 0.92;
+    opacity: 0.78;
 }
 
 .objective-tip span {
-    font-size: 0.58rem;
+    font-size: 0.54rem;
 }
 
 #hud-top-left #hud-tier {

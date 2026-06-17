@@ -788,22 +788,33 @@ function generateObstacles() {
         { x: 2320, y: 2460, w: 1060, h: 760, type: 'vault', label: 'VAULT WARD' },
         { x: 1650, y: 1540, w: 760, h: 720, type: 'center', label: 'DEAD CENTER' }
     ];
-    // seed equivalent based on activeTier or simple sequence
-    for (let i = 0; i < 56; i++) {
-        // Pseudo-random deterministic placement
-        const seedVal = Math.sin(i * 927.32) * 1000;
-        const ox = 150 + Math.abs(seedVal % (WORLD_WIDTH - 300));
-        const oy = 150 + Math.abs((seedVal * 1.5) % (WORLD_HEIGHT - 300));
-        const rad = 25 + Math.abs((seedVal * 2.3) % 25);
+    for (let i = 0; i < 44; i++) {
+        const seedA = fract(Math.sin(i * 127.13 + 4.7) * 43758.5453);
+        const seedB = fract(Math.sin(i * 311.91 + 9.2) * 24634.6345);
+        const seedC = fract(Math.sin(i * 719.17 + 1.9) * 13579.2468);
+        const ox = 160 + seedA * (WORLD_WIDTH - 320);
+        const oy = 160 + seedB * (WORLD_HEIGHT - 320);
+        const rad = 14 + seedC * 18;
+        const typeRoll = i % 4;
+        const type = typeRoll === 0 ? 'monolith' : typeRoll === 1 ? 'ruin' : typeRoll === 2 ? 'rift' : 'node';
 
-        // Ensure spawning center is empty
         const cx = WORLD_WIDTH / 2;
         const cy = WORLD_HEIGHT / 2;
         const dist = Math.hypot(ox - cx, oy - cy);
-        if (dist > 200) {
-            obstacleList.push({ x: ox, y: oy, rad: rad });
+        if (dist > 280 && !isInsideSpawnLane(ox, oy)) {
+            obstacleList.push({ x: ox, y: oy, rad, type, rot: seedC * Math.PI });
         }
     }
+}
+
+function fract(n) {
+    return n - Math.floor(n);
+}
+
+function isInsideSpawnLane(x, y) {
+    const dx = Math.abs(x - WORLD_WIDTH / 2);
+    const dy = Math.abs(y - WORLD_HEIGHT / 2);
+    return dx < 260 && dy < 780;
 }
 
 // ─── RENDER ENGINE (HTML5 CANVAS) ───
@@ -955,15 +966,9 @@ function draw() {
     // 3. Draw district zones
     drawDistrictZones(offsetX, offsetY);
 
-    // 4. Draw Obstacles
-    ctx.fillStyle = '#222';
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 2;
+    // 4. Draw map props
     for (let obs of obstacleList) {
-        ctx.beginPath();
-        ctx.arc(obs.x + offsetX, obs.y + offsetY, obs.radius || obs.rad, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        drawMapProp(obs, offsetX, offsetY);
     }
 
     // 5. Draw Particles
@@ -1025,6 +1030,13 @@ function drawGrid(ox, oy) {
         ctx.lineTo(endX + ox, y + oy);
         ctx.stroke();
     }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.045)';
+    for (let x = startX; x <= endX; x += gridSize * 2) {
+        for (let y = startY; y <= endY; y += gridSize * 2) {
+            ctx.fillRect(x + ox - 1, y + oy - 1, 2, 2);
+        }
+    }
 }
 
 function drawDistrictZones(ox, oy) {
@@ -1069,6 +1081,71 @@ function drawDistrictZones(ox, oy) {
         ctx.textAlign = 'left';
         ctx.fillText(zone.label, x + 14, y + 22);
     });
+}
+
+function drawMapProp(obs, ox, oy) {
+    const x = obs.x + ox;
+    const y = obs.y + oy;
+    const r = obs.rad;
+    const t = Date.now() / 1000;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(obs.rot || 0);
+
+    if (obs.type === 'monolith') {
+        ctx.fillStyle = 'rgba(32,32,32,0.95)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.55, r);
+        ctx.lineTo(-r * 0.35, -r * 0.85);
+        ctx.lineTo(0, -r * 1.25);
+        ctx.lineTo(r * 0.38, -r * 0.78);
+        ctx.lineTo(r * 0.55, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,204,68,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(0, -r * 0.65);
+        ctx.lineTo(0, r * 0.55);
+        ctx.stroke();
+    } else if (obs.type === 'ruin') {
+        ctx.fillStyle = 'rgba(36,36,36,0.9)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 2;
+        ctx.fillRect(-r, -r * 0.55, r * 2, r * 1.1);
+        ctx.strokeRect(-r, -r * 0.55, r * 2, r * 1.1);
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(-r * 0.38, -r * 0.22, r * 0.76, r * 0.44);
+    } else if (obs.type === 'rift') {
+        ctx.strokeStyle = 'rgba(204,0,0,0.42)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-r, -r * 0.65);
+        ctx.lineTo(-r * 0.35, -r * 0.1);
+        ctx.lineTo(-r * 0.62, r * 0.42);
+        ctx.lineTo(r * 0.1, r * 0.05);
+        ctx.lineTo(r * 0.72, r * 0.64);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8);
+    } else {
+        const pulse = 0.8 + Math.sin(t * 3 + obs.x) * 0.16;
+        ctx.fillStyle = 'rgba(204,170,0,0.14)';
+        ctx.strokeStyle = 'rgba(204,170,0,0.48)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.78)';
+        ctx.fillRect(-2, -2, 4, 4);
+    }
+
+    ctx.restore();
 }
 
 // ─── CYBER HUMAN PILOT DRAWING ───
@@ -1350,12 +1427,18 @@ function drawMinimap() {
         ctx.fillRect(mx + zone.x * scale, my + zone.y * scale, zone.w * scale, zone.h * scale);
     });
 
-    // Draw Obstacles on map
-    ctx.fillStyle = '#1f1f1f';
+    // Draw map props on radar
+    ctx.fillStyle = '#333';
     for (let obs of obstacleList) {
-        ctx.beginPath();
-        ctx.arc(mx + obs.x * scale, my + obs.y * scale, obs.rad * scale, 0, Math.PI * 2);
-        ctx.fill();
+        const px = mx + obs.x * scale;
+        const py = my + obs.y * scale;
+        if (obs.type === 'rift') {
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillRect(px - 1, py - 3, 2, 6);
+        } else {
+            ctx.fillStyle = '#444';
+            ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+        }
     }
 
     // Draw Other players

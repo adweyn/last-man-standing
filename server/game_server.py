@@ -478,16 +478,19 @@ import random
 def get_obstacles() -> list[dict]:
     """Generates the same deterministic obstacles list as the web client."""
     obstacles = []
-    for i in range(40):
-        seed_val = math.sin(i * 927.32) * 1000
-        ox = 150.0 + abs(seed_val % (WORLD_WIDTH - 300))
-        oy = 150.0 + abs((seed_val * 1.5) % (WORLD_HEIGHT - 300))
-        rad = 25.0 + abs((seed_val * 2.3) % 25)
+    for i in range(44):
+        seed_a = (math.sin(i * 127.13 + 4.7) * 43758.5453) % 1
+        seed_b = (math.sin(i * 311.91 + 9.2) * 24634.6345) % 1
+        seed_c = (math.sin(i * 719.17 + 1.9) * 13579.2468) % 1
+        ox = 160.0 + seed_a * (WORLD_WIDTH - 320)
+        oy = 160.0 + seed_b * (WORLD_HEIGHT - 320)
+        rad = 14.0 + seed_c * 18
 
         cx = WORLD_WIDTH / 2
         cy = WORLD_HEIGHT / 2
         dist = ((ox - cx) ** 2 + (oy - cy) ** 2) ** 0.5
-        if dist > 200:
+        in_spawn_lane = abs(ox - cx) < 260 and abs(oy - cy) < 780
+        if dist > 280 and not in_spawn_lane:
             obstacles.append({"x": ox, "y": oy, "rad": rad})
     return obstacles
 
