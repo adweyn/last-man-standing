@@ -43,6 +43,8 @@ let selfY = WORLD_HEIGHT / 2;
 let playersMap = new Map(); // id -> { username, x, y, is_alive }
 let bossState = { state: 'sleeping', x: 0, y: 0, targetX: 0, targetY: 0, time_remaining: 0, target_username: '' };
 let hazardZones = [];
+let crystals = [];
+let mapObjectives = [];
 
 // Physics / Viewport
 let camX = selfX;
@@ -174,6 +176,7 @@ async function tryTelegramAuth() {
 }
 
 function showAuthScreen() {
+    document.body.classList.remove('in-game');
     screenAuth.classList.remove('hidden');
     screenLobby.classList.add('hidden');
     screenGame.classList.add('hidden');
@@ -230,6 +233,7 @@ btnLogout.addEventListener('click', () => {
 
 // ─── LOBBY MANAGEMENT ───
 async function showLobbyScreen() {
+    document.body.classList.remove('in-game');
     screenAuth.classList.add('hidden');
     screenLobby.classList.remove('hidden');
     screenGame.classList.add('hidden');
@@ -400,6 +404,7 @@ async function joinTierTournament(tier) {
 }
 
 function startWebGame(tier) {
+    document.body.classList.add('in-game');
     screenLobby.classList.add('hidden');
     screenGame.classList.remove('hidden');
 
@@ -416,6 +421,8 @@ function startWebGame(tier) {
     camY = selfY;
     playersMap.clear();
     hazardZones = [];
+    crystals = [];
+    mapObjectives = [];
     particles = [];
     bossState = { state: 'sleeping', x: 0, y: 0, time_remaining: 0, target_username: '' };
 
@@ -512,6 +519,18 @@ function connectWebSocket() {
         }
         else if (mtype === 'hazard_list') {
             hazardZones = data.hazards || [];
+        }
+        else if (mtype === 'crystal_list') {
+            crystals = data.crystals || [];
+        }
+        else if (mtype === 'crystal_collected') {
+            addChatBubble('System', `${data.username} collected ${Number(data.value).toFixed(2)} CR`);
+        }
+        else if (mtype === 'objective_list') {
+            mapObjectives = data.objectives || [];
+        }
+        else if (mtype === 'objective_completed') {
+            addChatBubble('System', `${data.username} completed ${formatObjectiveType(data.objective_type)} +${Number(data.reward).toFixed(2)} CR`);
         }
         else if (mtype === 'player_eliminated') {
             addChatBubble('System', `${data.username} eliminated: ${formatDeathReason(data.reason)}`);
@@ -809,10 +828,14 @@ function draw() {
     // 4. Draw Particles
     drawParticles(offsetX, offsetY);
 
-    // 5. Draw temporary hazard zones
+    // 5. Draw map quest objects
+    drawCrystals(offsetX, offsetY);
+    drawMapObjectives(offsetX, offsetY);
+
+    // 6. Draw temporary hazard zones
     drawHazards(offsetX, offsetY);
 
-    // 6. Draw Other Players
+    // 7. Draw Other Players
     playersMap.forEach(p => {
         if (p.is_alive) {
             drawCyberAvatar(p.x + offsetX, p.y + offsetY, COLORS.GRAY, false, p.username);
@@ -821,7 +844,7 @@ function draw() {
         }
     });
 
-    // 7. Draw Self
+    // 8. Draw Self
     const selfAlive = !deathOverlay.classList.contains('hidden');
     if (!selfAlive) {
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
@@ -829,12 +852,12 @@ function draw() {
         drawTombstone(selfX + offsetX, selfY + offsetY);
     }
 
-    // 8. Draw Boss AI Void Creature
+    // 9. Draw Boss AI Void Creature
     if (bossState.state !== 'sleeping') {
         drawBoss(bossState.x + offsetX, bossState.y + offsetY);
     }
 
-    // 9. Draw Minimap Overlay
+    // 10. Draw Minimap Overlay
     drawMinimap();
 }
 
@@ -1041,6 +1064,68 @@ function drawBoss(x, y) {
     ctx.beginPath(); ctx.arc(x + eyeOffset, y - 4, eyeSize, 0, Math.PI*2); ctx.fill();
 }
 
+function drawCrystals(ox, oy) {
+    const t = Date.now() / 1000;
+    crystals.forEach(c => {
+        const x = c.x + ox;
+        const y = c.y + oy;
+        const r = 8 + Math.sin(t * 5 + c.id) * 1.5;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(t * 1.8 + c.id);
+        ctx.fillStyle = 'rgba(204, 170, 0, 0.85)';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.75, 0);
+        ctx.lineTo(0, r);
+        ctx.lineTo(-r * 0.75, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 9px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Number(c.value || 0).toFixed(1)} CR`, x, y - 18);
+    });
+}
+
+function drawMapObjectives(ox, oy) {
+    const t = Date.now() / 1000;
+    mapObjectives.forEach(o => {
+        const x = o.x + ox;
+        const y = o.y + oy;
+        const radius = o.radius || 28;
+        const pulse = 1 + Math.sin(t * 4 + o.id) * 0.08;
+        const color = getObjectiveColor(o.type);
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = color.fill;
+        ctx.fill();
+        ctx.strokeStyle = color.stroke;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = color.stroke;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.font = '900 14px Inter';
+        ctx.textAlign = 'center';
+        const glyph = getObjectiveGlyph(o.type);
+        ctx.strokeText(glyph, x, y + 5);
+        ctx.fillText(glyph, x, y + 5);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 9px Inter';
+        ctx.fillText(formatObjectiveType(o.type).toUpperCase(), x, y - radius - 8);
+    });
+}
+
 function drawHazards(ox, oy) {
     const t = Date.now() / 1000;
     hazardZones.forEach(h => {
@@ -1092,6 +1177,19 @@ function drawMinimap() {
             ctx.arc(px, py, p.is_alive ? 2 : 1, 0, Math.PI*2);
             ctx.fill();
         }
+    });
+
+    crystals.forEach(c => {
+        ctx.fillStyle = COLORS.YELLOW;
+        ctx.beginPath();
+        ctx.arc(mx + c.x * scale, my + c.y * scale, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    mapObjectives.forEach(o => {
+        const color = getObjectiveColor(o.type);
+        ctx.fillStyle = color.stroke;
+        ctx.fillRect(mx + o.x * scale - 2, my + o.y * scale - 2, 4, 4);
     });
 
     // Draw Self Dot
@@ -1236,6 +1334,27 @@ function formatDeathReason(reason) {
     if (reason === 'afk') return 'AFK';
     if (reason === 'hazard') return 'Hazard';
     return reason || 'Unknown';
+}
+
+function formatObjectiveType(type) {
+    if (type === 'scan') return 'scan obelisk';
+    if (type === 'relay') return 'signal relay';
+    if (type === 'cache') return 'supply cache';
+    return 'objective';
+}
+
+function getObjectiveGlyph(type) {
+    if (type === 'scan') return 'S';
+    if (type === 'relay') return 'R';
+    if (type === 'cache') return 'C';
+    return '?';
+}
+
+function getObjectiveColor(type) {
+    if (type === 'scan') return { fill: 'rgba(0, 204, 68, 0.13)', stroke: COLORS.GREEN };
+    if (type === 'relay') return { fill: 'rgba(204, 170, 0, 0.13)', stroke: COLORS.YELLOW };
+    if (type === 'cache') return { fill: 'rgba(204, 85, 0, 0.13)', stroke: COLORS.ORANGE };
+    return { fill: 'rgba(255, 255, 255, 0.1)', stroke: COLORS.WHITE };
 }
 
 function triggerVictoryOverlay(prize) {

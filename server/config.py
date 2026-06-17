@@ -168,6 +168,12 @@ CRYSTAL_MIN_VALUE: float = 0.10        # Minimum mock $ value of a crystal
 CRYSTAL_MAX_VALUE: float = 0.50        # Maximum mock $ value of a crystal
 CRYSTAL_SPAWN_RADIUS: int = 15        # Radius of a crystal for drawing/collisions
 
+MAP_OBJECTIVE_SPAWN_INTERVAL: float = float(os.getenv("MAP_OBJECTIVE_SPAWN_INTERVAL", "45.0"))
+MAP_OBJECTIVE_MAX_PER_TIER: int = int(os.getenv("MAP_OBJECTIVE_MAX_PER_TIER", "5"))
+MAP_OBJECTIVE_RADIUS: int = int(os.getenv("MAP_OBJECTIVE_RADIUS", "28"))
+MAP_OBJECTIVE_MIN_REWARD: float = float(os.getenv("MAP_OBJECTIVE_MIN_REWARD", "0.35"))
+MAP_OBJECTIVE_MAX_REWARD: float = float(os.getenv("MAP_OBJECTIVE_MAX_REWARD", "1.25"))
+
 QUEST_EXPLORER_TARGET: float = 3000.0  # Pixels of distance needed
 QUEST_EXPLORER_REWARD: float = 0.30    # Reward in mock $
 

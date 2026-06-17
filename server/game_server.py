@@ -19,7 +19,9 @@ from config import (
     PLAYER_LIST_INTERVAL, BOSS_UPDATE_INTERVAL,
     CRYSTAL_SPAWN_INTERVAL, CRYSTAL_MAX_PER_TIER,
     CRYSTAL_MIN_VALUE, CRYSTAL_MAX_VALUE, CRYSTAL_SPAWN_RADIUS,
-    HAZARD_MAX_PER_TIER, HAZARD_TICK_INTERVAL, HAZARD_DAMAGE_STILL_SECONDS
+    HAZARD_MAX_PER_TIER, HAZARD_TICK_INTERVAL, HAZARD_DAMAGE_STILL_SECONDS,
+    MAP_OBJECTIVE_SPAWN_INTERVAL, MAP_OBJECTIVE_MAX_PER_TIER,
+    MAP_OBJECTIVE_RADIUS, MAP_OBJECTIVE_MIN_REWARD, MAP_OBJECTIVE_MAX_REWARD
 )
 import database
 import notifications
@@ -39,6 +41,11 @@ crystal_id_counter = 0
 # { tier_id: [ { id, x, y, radius, expires_at } ] }
 tier_hazards: Dict[int, list] = {1: [], 2: [], 3: []}
 hazard_id_counter = 0
+
+# Active map objectives per tier:
+# { tier_id: [ { id, type, x, y, radius, reward, expires_at } ] }
+tier_objectives: Dict[int, list] = {1: [], 2: [], 3: []}
+objective_id_counter = 0
 
 # Global reference to BossAI instances per tier. Set during startup.
 boss_instances: Dict[int, Any] = {}
@@ -248,6 +255,11 @@ async def handle_connection(websocket, path=None):
             "hazards": tier_hazards[tier_id]
         }))
 
+        await websocket.send(json.dumps({
+            "type": "objective_list",
+            "objectives": tier_objectives[tier_id]
+        }))
+
         # 4. RECEIVE LOOP
         async for msg_str in websocket:
             try:
@@ -332,6 +344,38 @@ async def handle_connection(websocket, path=None):
                         "crystals": tier_crystals[tier_id]
                     })
 
+                completed_objectives = []
+                for objective in tier_objectives[tier_id]:
+                    o_dist = ((new_x - objective["x"]) ** 2 + (new_y - objective["y"]) ** 2) ** 0.5
+                    if o_dist < objective["radius"] + 12:
+                        completed_objectives.append(objective)
+
+                for objective in completed_objectives:
+                    if objective not in tier_objectives[tier_id]:
+                        continue
+                    tier_objectives[tier_id].remove(objective)
+                    await database.update_balance(player_id, objective["reward"])
+
+                    if objective["type"] == "scan":
+                        await database.increment_quest_progress(player_id, "explorer", 800.0)
+                    elif objective["type"] == "cache":
+                        await database.increment_quest_progress(player_id, "scavenger", 2.0)
+                    elif objective["type"] == "relay":
+                        await database.increment_quest_progress(player_id, "survivor", 25.0)
+
+                    await broadcast_to_tier(tier_id, {
+                        "type": "objective_completed",
+                        "objective_id": objective["id"],
+                        "objective_type": objective["type"],
+                        "player_id": player_id,
+                        "username": username,
+                        "reward": objective["reward"]
+                    })
+                    await broadcast_to_tier(tier_id, {
+                        "type": "objective_list",
+                        "objectives": tier_objectives[tier_id]
+                    })
+
             elif msg_type == "chat":
                 chat_text = str(msg.get("message", ""))[:120].strip()
                 # Sanitize: strip HTML tags and shell-like chars
@@ -413,6 +457,7 @@ async def start_websocket_server():
             player_broadcast_loop(),
             boss_broadcast_loop(),
             crystal_spawner_loop(),
+            objective_spawner_loop(),
             hazard_director_loop(),
             quest_survivor_loop()
         )
@@ -490,6 +535,73 @@ async def crystal_spawner_loop():
             break
         except Exception as e:
             logger.error(f"Error in crystal spawner loop: {e}", exc_info=True)
+
+
+async def spawn_objective(tier_id: int, obstacles: list[dict]):
+    """Spawn an interactive map objective that rewards movement and risk."""
+    global objective_id_counter
+    objective_types = ("scan", "relay", "cache")
+
+    for _ in range(12):
+        x = float(random.randint(140, WORLD_WIDTH - 140))
+        y = float(random.randint(140, WORLD_HEIGHT - 140))
+
+        collides = False
+        for obs in obstacles:
+            dist = ((x - obs["x"]) ** 2 + (y - obs["y"]) ** 2) ** 0.5
+            if dist < obs["rad"] + MAP_OBJECTIVE_RADIUS + 20:
+                collides = True
+                break
+        if collides:
+            continue
+
+        objective_id_counter += 1
+        obj_type = random.choice(objective_types)
+        reward = round(random.uniform(MAP_OBJECTIVE_MIN_REWARD, MAP_OBJECTIVE_MAX_REWARD), 2)
+        objective = {
+            "id": objective_id_counter,
+            "type": obj_type,
+            "x": x,
+            "y": y,
+            "radius": float(MAP_OBJECTIVE_RADIUS),
+            "reward": reward,
+            "expires_at": time.time() + random.uniform(70, 140),
+        }
+        tier_objectives[tier_id].append(objective)
+        await broadcast_to_tier(tier_id, {
+            "type": "objective_list",
+            "objectives": tier_objectives[tier_id]
+        })
+        break
+
+
+async def objective_spawner_loop():
+    """Periodically creates visible quest points in active rooms."""
+    obstacles = get_obstacles()
+    while True:
+        try:
+            await asyncio.sleep(MAP_OBJECTIVE_SPAWN_INTERVAL)
+            now = time.time()
+            for tier_id in [1, 2, 3]:
+                if not tier_connections[tier_id]:
+                    if tier_objectives[tier_id]:
+                        tier_objectives[tier_id] = []
+                    continue
+
+                before = len(tier_objectives[tier_id])
+                tier_objectives[tier_id] = [o for o in tier_objectives[tier_id] if o["expires_at"] > now]
+                if before != len(tier_objectives[tier_id]):
+                    await broadcast_to_tier(tier_id, {
+                        "type": "objective_list",
+                        "objectives": tier_objectives[tier_id]
+                    })
+
+                if len(tier_objectives[tier_id]) < MAP_OBJECTIVE_MAX_PER_TIER:
+                    await spawn_objective(tier_id, obstacles)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in objective spawner loop: {e}", exc_info=True)
 
 
 async def quest_survivor_loop():
