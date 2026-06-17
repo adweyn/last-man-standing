@@ -26,6 +26,14 @@
     -webkit-user-drag: none;
 }
 
+html {
+    width: 100%;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 body {
     background-color: var(--bg-color);
     color: var(--text-color);
@@ -38,11 +46,13 @@ body {
     justify-content: center;
     align-items: flex-start;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
 }
 
 body.in-game {
     overflow: hidden;
     height: 100vh;
+    touch-action: none;
 }
 
 /* ─── Drifting Background Particles ─── */
@@ -117,6 +127,20 @@ header {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     margin-bottom: 20px;
     transition: all 0.3s ease;
+}
+
+#screen-lobby {
+    max-height: calc(var(--tg-viewport-height, 100vh) - 96px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 28px;
+}
+
+#screen-auth {
+    max-height: calc(var(--tg-viewport-height, 100vh) - 96px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .panel-title {

@@ -233,6 +233,9 @@ async def handle_connection(websocket, path=None):
         tier_connections[tier_id][websocket] = client_info
         logger.info(f"Player {username} (ID: {player_id}) connected to Tier {tier_id}")
 
+        obstacles = get_obstacles()
+        await ensure_initial_map_content(tier_id, obstacles, spawn_x, spawn_y)
+
         # Send welcome/handshake message
         await websocket.send(json.dumps({
             "type": "welcome",
@@ -344,6 +347,9 @@ async def handle_connection(websocket, path=None):
                         "crystals": tier_crystals[tier_id]
                     })
 
+                if collected_crystals and len(tier_crystals[tier_id]) < 2:
+                    await spawn_crystal(tier_id, get_obstacles(), near=(new_x, new_y))
+
                 completed_objectives = []
                 for objective in tier_objectives[tier_id]:
                     o_dist = ((new_x - objective["x"]) ** 2 + (new_y - objective["y"]) ** 2) ** 0.5
@@ -375,6 +381,9 @@ async def handle_connection(websocket, path=None):
                         "type": "objective_list",
                         "objectives": tier_objectives[tier_id]
                     })
+
+                    if len(tier_objectives[tier_id]) < 3:
+                        await spawn_objective(tier_id, get_obstacles(), near=(new_x, new_y))
 
             elif msg_type == "chat":
                 chat_text = str(msg.get("message", ""))[:120].strip()
@@ -483,22 +492,33 @@ def get_obstacles() -> list[dict]:
     return obstacles
 
 
-async def spawn_crystal(tier_id: int, obstacles: list[dict]):
+def is_clean_map_spot(x: float, y: float, radius: float, obstacles: list[dict]) -> bool:
+    for obs in obstacles:
+        dist = ((x - obs["x"]) ** 2 + (y - obs["y"]) ** 2) ** 0.5
+        if dist < obs["rad"] + radius + 20:
+            return False
+    return True
+
+
+def nearby_point(origin_x: float, origin_y: float, min_dist: int = 180, max_dist: int = 420) -> tuple[float, float]:
+    angle = random.random() * math.pi * 2
+    dist = random.randint(min_dist, max_dist)
+    x = max(100.0, min(float(WORLD_WIDTH - 100), origin_x + math.cos(angle) * dist))
+    y = max(100.0, min(float(WORLD_HEIGHT - 100), origin_y + math.sin(angle) * dist))
+    return x, y
+
+
+async def spawn_crystal(tier_id: int, obstacles: list[dict], near: Optional[tuple[float, float]] = None):
     """Finds a clean spot and spawns a collectible crystal in a tier room."""
     global crystal_id_counter
     for _ in range(10):  # 10 attempts to find clean coordinate
-        x = float(random.randint(100, WORLD_WIDTH - 100))
-        y = float(random.randint(100, WORLD_HEIGHT - 100))
+        if near:
+            x, y = nearby_point(near[0], near[1], 140, 320)
+        else:
+            x = float(random.randint(100, WORLD_WIDTH - 100))
+            y = float(random.randint(100, WORLD_HEIGHT - 100))
         
-        # Check collision with obstacles
-        collides = False
-        for obs in obstacles:
-            dist = ((x - obs["x"]) ** 2 + (y - obs["y"]) ** 2) ** 0.5
-            if dist < obs["rad"] + CRYSTAL_SPAWN_RADIUS + 10:
-                collides = True
-                break
-        
-        if not collides:
+        if is_clean_map_spot(x, y, CRYSTAL_SPAWN_RADIUS, obstacles):
             crystal_id_counter += 1
             val = round(random.uniform(CRYSTAL_MIN_VALUE, CRYSTAL_MAX_VALUE), 2)
             crystal = {
@@ -537,22 +557,19 @@ async def crystal_spawner_loop():
             logger.error(f"Error in crystal spawner loop: {e}", exc_info=True)
 
 
-async def spawn_objective(tier_id: int, obstacles: list[dict]):
+async def spawn_objective(tier_id: int, obstacles: list[dict], near: Optional[tuple[float, float]] = None):
     """Spawn an interactive map objective that rewards movement and risk."""
     global objective_id_counter
     objective_types = ("scan", "relay", "cache")
 
     for _ in range(12):
-        x = float(random.randint(140, WORLD_WIDTH - 140))
-        y = float(random.randint(140, WORLD_HEIGHT - 140))
+        if near:
+            x, y = nearby_point(near[0], near[1])
+        else:
+            x = float(random.randint(140, WORLD_WIDTH - 140))
+            y = float(random.randint(140, WORLD_HEIGHT - 140))
 
-        collides = False
-        for obs in obstacles:
-            dist = ((x - obs["x"]) ** 2 + (y - obs["y"]) ** 2) ** 0.5
-            if dist < obs["rad"] + MAP_OBJECTIVE_RADIUS + 20:
-                collides = True
-                break
-        if collides:
+        if not is_clean_map_spot(x, y, MAP_OBJECTIVE_RADIUS, obstacles):
             continue
 
         objective_id_counter += 1
@@ -573,6 +590,17 @@ async def spawn_objective(tier_id: int, obstacles: list[dict]):
             "objectives": tier_objectives[tier_id]
         })
         break
+
+
+async def ensure_initial_map_content(tier_id: int, obstacles: list[dict], spawn_x: float, spawn_y: float):
+    """Make a newly joined room immediately show nearby goals and rewards."""
+    if len(tier_crystals[tier_id]) < 2:
+        await spawn_crystal(tier_id, obstacles, near=(spawn_x, spawn_y))
+    while len(tier_objectives[tier_id]) < 3:
+        before = len(tier_objectives[tier_id])
+        await spawn_objective(tier_id, obstacles, near=(spawn_x, spawn_y))
+        if len(tier_objectives[tier_id]) == before:
+            break
 
 
 async def objective_spawner_loop():

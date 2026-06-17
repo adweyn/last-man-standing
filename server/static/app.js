@@ -116,6 +116,8 @@ const joystickHandle = document.getElementById('joystick-handle');
 
 // ─── INIT & AUTH ROUTINES ───
 window.addEventListener('DOMContentLoaded', async () => {
+    syncTelegramViewportHeight();
+
     // Generate deterministic obstacles based on client
     generateObstacles();
 
@@ -138,11 +140,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
+window.addEventListener('resize', syncTelegramViewportHeight);
+
+function syncTelegramViewportHeight() {
+    const tg = window.Telegram?.WebApp;
+    const height = tg?.viewportHeight || window.innerHeight || document.documentElement.clientHeight;
+    document.documentElement.style.setProperty('--tg-viewport-height', `${height}px`);
+}
+
 async function tryTelegramAuth() {
     const tg = window.Telegram?.WebApp;
     if (tg && tg.initData) {
         tg.ready();
         tg.expand();
+        syncTelegramViewportHeight();
+        tg.onEvent?.('viewportChanged', syncTelegramViewportHeight);
 
         try {
             const resp = await fetch(`${SERVER_API_URL}/telegram-auth`, {
@@ -845,7 +857,7 @@ function draw() {
     });
 
     // 8. Draw Self
-    const selfAlive = !deathOverlay.classList.contains('hidden');
+    const selfAlive = deathOverlay.classList.contains('hidden');
     if (!selfAlive) {
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
     } else {
