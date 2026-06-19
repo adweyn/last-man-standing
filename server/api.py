@@ -70,6 +70,23 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/telegram-app/static", StaticFiles(directory=static_dir), name="static")
 
+@app.get("/")
+async def get_landing_page():
+    return FileResponse(os.path.join(static_dir, "landing.html"))
+
+
+@app.get("/download/windows")
+async def download_windows_client():
+    file_path = os.path.join(static_dir, "downloads", "LastManStanding-Windows.zip")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Windows build is not available yet")
+    return FileResponse(
+        file_path,
+        media_type="application/zip",
+        filename="LastManStanding-Windows.zip",
+    )
+
+
 @app.get("/telegram-app")
 async def get_telegram_app():
     return FileResponse(os.path.join(static_dir, "index.html"))

@@ -93,13 +93,15 @@ class MainMenu:
         # User details cached
         self.player_profile: Optional[dict] = None
         self.tier_stats: Dict[int, dict] = {}
+        self.quests: List[dict] = []
+        self.leaderboard: List[dict] = []
 
         # Messages
         self.status_msg = ""
         self.status_color = COLORS["WHITE"]
 
         # Selection state
-        self.selected_tier: Optional[int] = None
+        self.selected_tier: int = 1
 
     def _init_forms(self):
         cx = self.width // 2
@@ -146,6 +148,8 @@ class MainMenu:
                     stats = self.network.get_tier_stats(t)
                     if stats:
                         self.tier_stats[t] = stats
+                self.quests = self.network.get_quests()
+                self.leaderboard = self.network.get_leaderboard()[:5]
             except Exception:
                 pass
             finally:
@@ -253,35 +257,50 @@ class MainMenu:
         # ─── TIER SELECTION LOBBY ────────────────────────────────────────────────
         elif self.state == "tier_select":
             # Three cards horizontally
-            card_w = 260
-            card_h = 320
-            gap = 40
-            start_x = cx - (card_w * 3 + gap * 2) // 2
+            card_w = 230
+            card_h = 250
+            gap = 25
+            start_x = 55
+            ty = 250
 
             for i, tier in enumerate([1, 2, 3]):
                 tx = start_x + i * (card_w + gap)
-                ty = 220
                 if tx <= mx <= tx + card_w and ty <= my <= ty + card_h:
                     self.selected_tier = tier
                     self.status_msg = ""
-                    # Check balance vs fee
-                    fee = TIER_INFO[tier]["fee"]
-                    bal = self.player_profile.get("balance", 0.0) if self.player_profile else 0.0
-                    
-                    if bal < fee:
-                        self.status_msg = f"Insufficient funds. Need ${fee:.2f}."
-                        self.status_color = COLORS["RED"]
-                        return None
+                    return None
 
-                    # Call join api
-                    success, err = self.network.join_tier(tier)
-                    if success:
-                        # Success joining server lobby, start the websocket!
-                        self.network.connect()
-                        return tier
-                    else:
-                        self.status_msg = err
-                        self.status_color = COLORS["RED"]
+            # Start selected tier
+            if 305 <= mx <= 565 and 535 <= my <= 588:
+                tier = self.selected_tier
+                fee = TIER_INFO[tier]["fee"]
+                bal = self.player_profile.get("balance", 0.0) if self.player_profile else 0.0
+                if bal < fee:
+                    self.status_msg = f"Need {fee - bal:.2f} more CR for Tier {tier}."
+                    self.status_color = COLORS["RED"]
+                    return None
+
+                success, err = self.network.join_tier(tier)
+                if success:
+                    self.network.connect()
+                    return tier
+                self.status_msg = err
+                self.status_color = COLORS["RED"]
+
+            # Claim ready quest buttons
+            qx, qy = 835, 250
+            for idx, quest in enumerate(self.quests[:3]):
+                row_y = qy + 44 + idx * 44
+                claimable = bool(quest.get("claimable")) or (
+                    float(quest.get("progress", 0)) >= float(quest.get("target", 1))
+                    and not bool(quest.get("is_claimed"))
+                )
+                if claimable and qx + 300 <= mx <= qx + 382 and row_y <= my <= row_y + 30:
+                    ok, msg = self.network.claim_quest(quest.get("quest_type", ""))
+                    self.status_msg = msg
+                    self.status_color = COLORS["GREEN"] if ok else COLORS["RED"]
+                    self.refresh_lobby_data()
+                    return None
 
             # Deposit mock money button
             if 30 <= mx <= 180 and self.height - 70 <= my <= self.height - 30:
@@ -289,7 +308,7 @@ class MainMenu:
                 if success:
                     if self.player_profile:
                         self.player_profile["balance"] = new_bal
-                    self.status_msg = "+$10.00 deposited (Mock mode)."
+                    self.status_msg = "+10.00 CR deposited (Mock mode)."
                     self.status_color = COLORS["GREEN"]
                 else:
                     self.status_msg = err
@@ -384,31 +403,34 @@ class MainMenu:
         if self.player_profile:
             bal = self.player_profile.get("balance", 0.0)
         
-        bal_txt = self.large_font.render(f"ACCOUNT BALANCE: ${bal:.2f}", True, COLORS["WHITE"])
+        bal_txt = self.large_font.render(f"CREDIT BALANCE: {bal:.2f} CR", True, COLORS["WHITE"])
         self.screen.blit(bal_txt, (cx - bal_txt.get_width() // 2, 175))
 
         # Horizontal tier cards
-        card_w = 260
-        card_h = 320
-        gap = 40
-        start_x = cx - (card_w * 3 + gap * 2) // 2
+        card_w = 230
+        card_h = 250
+        gap = 25
+        start_x = 55
+        ty = 250
 
         for i, tier in enumerate([1, 2, 3]):
             info = TIER_INFO[tier]
             tx = start_x + i * (card_w + gap)
-            ty = 220
 
             # Get database stats
             stats = self.tier_stats.get(tier, {"total": 0, "alive": 0, "prize_pool": 0.0})
             
             # Hover check
             is_hover = (tx <= mx <= tx + card_w and ty <= my <= ty + card_h)
-            border_col = COLORS["WHITE"] if is_hover else COLORS["PANEL_BORDER"]
-            bg_col = (24, 24, 24) if is_hover else COLORS["PANEL_BG"]
+            is_selected = self.selected_tier == tier
+            border_col = COLORS["WHITE"] if is_hover or is_selected else COLORS["PANEL_BORDER"]
+            bg_col = (30, 30, 30) if is_hover or is_selected else COLORS["PANEL_BG"]
 
             # Draw card outline
             pygame.draw.rect(self.screen, bg_col, (tx, ty, card_w, card_h), border_radius=8)
-            pygame.draw.rect(self.screen, border_col, (tx, ty, card_w, card_h), 2 if is_hover else 1, border_radius=8)
+            pygame.draw.rect(self.screen, border_col, (tx, ty, card_w, card_h), 3 if is_selected else 2 if is_hover else 1, border_radius=8)
+            if is_selected:
+                pygame.draw.rect(self.screen, COLORS["WHITE"], (tx, ty, 5, card_h), border_radius=2)
 
             # Card text details
             lbl = self.large_font.render(info["label"], True, COLORS["WHITE"])
@@ -418,32 +440,40 @@ class MainMenu:
             self.screen.blit(desc, (tx + (card_w - desc.get_width()) // 2, ty + 60))
 
             # Entry fee
-            fee_lbl = self.title_font.render(f"${info['fee']:.0f}", True, COLORS["WHITE"])
+            fee_lbl = self.title_font.render(f"{info['fee']:.0f} CR", True, COLORS["WHITE"])
             # shrink font if needed
-            self.screen.blit(fee_lbl, (tx + (card_w - fee_lbl.get_width()) // 2, ty + 95))
+            self.screen.blit(fee_lbl, (tx + (card_w - fee_lbl.get_width()) // 2, ty + 88))
             
             # Line separator
-            pygame.draw.line(self.screen, border_col, (tx + 30, ty + 180), (tx + card_w - 30, ty + 180), 1)
+            pygame.draw.line(self.screen, border_col, (tx + 30, ty + 160), (tx + card_w - 30, ty + 160), 1)
 
             # Live count / prize
             prize = stats.get("prize_pool", 0.0)
-            prize_txt = self.medium_font.render(f"Prize: ${prize:.2f}", True, COLORS["YELLOW"])
-            self.screen.blit(prize_txt, (tx + (card_w - prize_txt.get_width()) // 2, ty + 200))
+            prize_txt = self.medium_font.render(f"Prize: {prize:.2f} CR", True, COLORS["YELLOW"])
+            self.screen.blit(prize_txt, (tx + (card_w - prize_txt.get_width()) // 2, ty + 176))
 
             alive = stats.get("alive", 0)
             total = stats.get("total", 0)
             alive_txt = self.small_font.render(f"Survivors: {alive} / {total}", True, COLORS["GRAY"])
-            self.screen.blit(alive_txt, (tx + (card_w - alive_txt.get_width()) // 2, ty + 235))
+            self.screen.blit(alive_txt, (tx + (card_w - alive_txt.get_width()) // 2, ty + 210))
 
             # Boss state info
             b_state = stats.get("boss_status", {}).get("state", "sleeping")
             b_col = COLORS["RED"] if b_state != "sleeping" else COLORS["GRAY"]
             b_txt = self.small_font.render(f"Boss: {b_state.upper()}", True, b_col)
-            self.screen.blit(b_txt, (tx + (card_w - b_txt.get_width()) // 2, ty + 270))
+            self.screen.blit(b_txt, (tx + (card_w - b_txt.get_width()) // 2, ty + 232))
+
+        selected = TIER_INFO[self.selected_tier]
+        start_label = f"START {selected['label']}  /  {selected['fee']:.0f} CR"
+        self._draw_button(start_label, 305, 535, 260, 53)
+        hint = self.small_font.render("Choose a world, then start. Death is permanent.", True, COLORS["GRAY"])
+        self.screen.blit(hint, (305 + 130 - hint.get_width() // 2, 596))
+
+        self._draw_side_panels()
 
         # Bottom Utilities
         # Mock Deposit Button
-        self._draw_button("+$10 DEPOSIT", 30, self.height - 70, 150, 40)
+        self._draw_button("+10 CR DEV", 30, self.height - 70, 150, 40)
 
         # Mock Mobile Alert Registration
         fcm_reg = self.player_profile.get("fcm_registered", False) if self.player_profile else False
@@ -452,6 +482,66 @@ class MainMenu:
 
         # Logout
         self._draw_button("LOGOUT", cx - 60, self.height - 65, 120, 35)
+
+    def _draw_side_panels(self):
+        x = 835
+        y = 230
+        w = 390
+        self._draw_panel(x, y, w, 175, "DAILY QUESTS", "CLAIM CR")
+        for idx, quest in enumerate(self.quests[:3]):
+            row_y = y + 44 + idx * 44
+            q_type = quest.get("quest_type", "quest")
+            progress = float(quest.get("progress", 0) or 0)
+            target = max(1.0, float(quest.get("target", 1) or 1))
+            reward = float(quest.get("reward", 0) or 0)
+            pct = min(100, int((progress / target) * 100))
+            claimed = bool(quest.get("is_claimed"))
+            claimable = bool(quest.get("claimable")) or (progress >= target and not claimed)
+            name = self._quest_name(q_type)
+            title = self.small_font.render(name, True, COLORS["WHITE"])
+            detail = self.small_font.render(f"{pct}%  {progress:.0f}/{target:.0f}  +{reward:.2f} CR", True, COLORS["GRAY"])
+            self.screen.blit(title, (x + 12, row_y))
+            self.screen.blit(detail, (x + 12, row_y + 18))
+            btn_label = "DONE" if claimed else "CLAIM" if claimable else "RUN"
+            self._draw_small_button(btn_label, x + 300, row_y, 82, 30, active=claimable)
+
+        y2 = 430
+        self._draw_panel(x, y2, w, 160, "LEADERBOARD", "TOP 5")
+        if not self.leaderboard:
+            empty = self.small_font.render("No runs yet. Be first.", True, COLORS["GRAY"])
+            self.screen.blit(empty, (x + 12, y2 + 44))
+        for idx, row in enumerate(self.leaderboard[:5]):
+            row_y = y2 + 42 + idx * 22
+            seconds = int(float(row.get("survival_time", 0) or 0))
+            text = f"#{idx + 1} {row.get('username', 'Unknown')}  T{row.get('tier_id', '?')}  {seconds}s"
+            surf = self.small_font.render(text[:48], True, COLORS["WHITE"] if idx == 0 else COLORS["GRAY"])
+            self.screen.blit(surf, (x + 12, row_y))
+
+    def _draw_panel(self, x: int, y: int, w: int, h: int, left: str, right: str):
+        pygame.draw.rect(self.screen, COLORS["PANEL_BG"], (x, y, w, h), border_radius=8)
+        pygame.draw.rect(self.screen, COLORS["PANEL_BORDER"], (x, y, w, h), 1, border_radius=8)
+        l = self.small_font.render(left, True, COLORS["WHITE"])
+        r = self.small_font.render(right, True, COLORS["GRAY"])
+        self.screen.blit(l, (x + 12, y + 12))
+        self.screen.blit(r, (x + w - r.get_width() - 12, y + 12))
+
+    def _draw_small_button(self, label: str, x: int, y: int, w: int, h: int, active: bool = False):
+        mx, my = pygame.mouse.get_pos()
+        hover = x <= mx <= x + w and y <= my <= y + h
+        border = COLORS["WHITE"] if hover or active else COLORS["PANEL_BORDER"]
+        fill = COLORS["WHITE"] if active else COLORS["PANEL_BG"]
+        text = COLORS["BLACK"] if active else COLORS["WHITE"]
+        pygame.draw.rect(self.screen, fill, (x, y, w, h), border_radius=4)
+        pygame.draw.rect(self.screen, border, (x, y, w, h), 1, border_radius=4)
+        surf = self.small_font.render(label, True, text)
+        self.screen.blit(surf, (x + (w - surf.get_width()) // 2, y + (h - surf.get_height()) // 2))
+
+    def _quest_name(self, quest_type: str) -> str:
+        return {
+            "explorer": "Explorer",
+            "survivor": "Survivor",
+            "scavenger": "Scavenger",
+        }.get(quest_type, "Quest")
 
     def _draw_button(self, label: str, x: int, y: int, w: int, h: int, active: bool = False):
         mx, my = pygame.mouse.get_pos()

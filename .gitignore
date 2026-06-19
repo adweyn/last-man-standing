@@ -19,6 +19,11 @@ client/build/
 client/dist/
 client/release/
 client/*.spec
+desktop/venv/
+desktop/build/
+desktop/dist/
+desktop/release/
+desktop/*.spec
 
 # IDE / OS metadata
 .vscode/

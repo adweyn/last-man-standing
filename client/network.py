@@ -42,7 +42,12 @@ class NetworkManager:
             "you_died": None,
             "snap_back": None,
             "disconnect": None,
-            "kicked": None
+            "kicked": None,
+            "crystal_list": None,
+            "hazard_list": None,
+            "objective_list": None,
+            "crystal_collected": None,
+            "objective_completed": None
         }
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +137,41 @@ class NetworkManager:
             return resp.json() if resp.status_code == 200 else None
         except requests.RequestException:
             return None
+
+    def get_quests(self) -> list[dict]:
+        if not self.auth_token:
+            return []
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            resp = requests.get(f"{SERVER_API_URL}/quests", headers=headers, timeout=HTTP_TIMEOUT)
+            return resp.json() if resp.status_code == 200 else []
+        except requests.RequestException:
+            return []
+
+    def claim_quest(self, quest_type: str) -> tuple[bool, str]:
+        if not self.auth_token:
+            return False, "Not authenticated"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            resp = requests.post(
+                f"{SERVER_API_URL}/quests/claim",
+                json={"quest_type": quest_type},
+                headers=headers,
+                timeout=HTTP_TIMEOUT
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return True, data.get("message", "Quest claimed")
+            return False, str(resp.json().get("detail", "Quest not ready"))
+        except requests.RequestException as e:
+            return False, f"Connection error: {str(e)}"
+
+    def get_leaderboard(self) -> list[dict]:
+        try:
+            resp = requests.get(f"{SERVER_API_URL}/leaderboard", timeout=HTTP_TIMEOUT)
+            return resp.json() if resp.status_code == 200 else []
+        except requests.RequestException:
+            return []
 
     def update_fcm_token(self, fcm_token: str) -> bool:
         if not self.auth_token:

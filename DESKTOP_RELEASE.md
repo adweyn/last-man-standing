@@ -3,6 +3,14 @@
 This project can ship as a downloadable Windows PC client while keeping the
 online server on Render.
 
+There are two desktop options:
+
+- `desktop/` is the recommended PC release. It opens the current web/Telegram
+  game in a clean desktop app window, so it uses the same updated map, quests,
+  lobby, and HUD.
+- `client/` is the older Pygame client. Keep it for experiments only unless you
+  want to manually port every UI/gameplay change into Pygame.
+
 ## 1. Deploy The Server
 
 Render should run the Python backend from `server/`.
@@ -28,50 +36,47 @@ SERVER_HOST=0.0.0.0
 For long-term production, use a persistent disk or migrate from SQLite to
 PostgreSQL. Without persistent storage, Render restarts can wipe SQLite data.
 
-## 2. Configure The PC Client
+## 2. Configure The Recommended PC App
 
 Copy:
 
 ```text
-client/client_settings.example.json
-```
-
-to:
-
-```text
-client/client_settings.json
+desktop/app_settings.json
 ```
 
 Use your real Render URL:
 
 ```json
 {
-  "server_api_url": "https://your-render-app.onrender.com",
-  "server_ws_url": "wss://your-render-app.onrender.com/ws"
+  "game_url": "https://your-render-app.onrender.com/telegram-app",
+  "width": 1280,
+  "height": 760,
+  "fullscreen": false
 }
 ```
 
-The downloadable `.exe` also reads `client_settings.json` from the same folder
-as the executable, so you can change server URLs without rebuilding.
+The downloadable `.exe` also reads `app_settings.json` from the same folder as
+the executable, so you can change the URL without rebuilding.
 
 ## 3. Build Windows EXE
 
 From PowerShell:
 
 ```powershell
-cd client
+cd desktop
 .\build_windows.ps1
 ```
 
 Output:
 
 ```text
-client/dist/LastManStanding.exe
-client/dist/client_settings.json
+desktop/dist/LastManStanding.exe
+desktop/dist/app_settings.json
+desktop/release/LastManStanding-PC-Web.zip
 ```
 
-Before publishing, edit `client/dist/client_settings.json` with the production
-Render URL.
+Before publishing, make sure `desktop/dist/app_settings.json` points at the
+production Render URL.
 
 ## 4. Publish
 
@@ -79,7 +84,7 @@ Zip these files:
 
 ```text
 LastManStanding.exe
-client_settings.json
+app_settings.json
 ```
 
 Upload the zip to itch.io, a landing page, or a private download link.
@@ -89,10 +94,11 @@ Upload the zip to itch.io, a landing page, or a private download link.
 1. Player downloads the zip.
 2. Player extracts it.
 3. Player runs `LastManStanding.exe`.
-4. Client connects to the online Render server.
+4. Client opens the current online game from Render.
 5. Players see each other through WebSocket multiplayer.
 
 ## 6. Recommended Next Step
 
-This Pygame build is the fastest downloadable MVP. For a more premium game feel,
-keep the same backend and later rebuild only the client in Godot 4.
+This desktop web build is the fastest downloadable MVP. For a more premium
+native game feel, keep the same backend and later rebuild only the client in
+Godot 4.

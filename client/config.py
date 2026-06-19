@@ -19,8 +19,9 @@ def _load_client_settings() -> dict:
     if not settings_path.exists():
         return {}
     try:
-        return json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return json.loads(settings_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Could not read client_settings.json: {exc}")
         return {}
 
 

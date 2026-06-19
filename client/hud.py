@@ -49,7 +49,7 @@ class HUD:
         t_lbl = self.small_font.render(f"TIER {tier_id} TOURNAMENT", True, COLORS["GRAY"])
         surface.blit(t_lbl, (25, 22))
 
-        p_lbl = self.large_font.render(f"${prize:.2f}", True, COLORS["WHITE"])
+        p_lbl = self.large_font.render(f"{prize:.2f} CR", True, COLORS["WHITE"])
         surface.blit(p_lbl, (25, 40))
 
         # ─── TOP RIGHT: LIVE SURVIVOR COUNT ──────────────────────────────────────
@@ -112,7 +112,7 @@ class HUD:
             flash = (int(time.time() * 4) % 2 == 0)
             text_color = COLORS["RED"] if flash else COLORS["WHITE"]
 
-            alert_text = "⚠️ WARNING: BOSS ACTIVE & HUNTING!"
+            alert_text = "WARNING: BOSS ACTIVE & HUNTING!"
             alert_surf = self.alert_font.render(alert_text, True, text_color)
             surface.blit(alert_surf, (width // 2 - alert_surf.get_width() // 2, 85))
 
@@ -160,8 +160,8 @@ class HUD:
             pygame.draw.rect(self.banner_surf, COLORS["RED"], (0, 0, b_w, b_h), 1, border_radius=4)
 
             # Text
-            elim_text = f"💀 {banner['username'].upper()} ELIMINATED"
-            reason_text = "Killed by the Boss" if banner["reason"] == "boss" else "Eliminated due to AFK"
+            elim_text = f"{banner['username'].upper()} ELIMINATED"
+            reason_text = "Killed by the Boss" if banner["reason"] == "boss" else f"Eliminated: {banner['reason']}"
             
             elim_surf = self.medium_font.render(elim_text, True, COLORS["WHITE"])
             reason_surf = self.small_font.render(reason_text, True, COLORS["GRAY"])

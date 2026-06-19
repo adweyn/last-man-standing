@@ -46,6 +46,9 @@ class GameplayScreen:
         # Dictionary of players: {id: {username, x, y, is_alive}}
         self.players: Dict[int, Dict[str, Any]] = {}
         self.boss_state: Dict[str, Any] = {"state": "sleeping", "x": 0.0, "y": 0.0, "time_remaining": 0}
+        self.crystals: List[Dict[str, Any]] = []
+        self.hazards: List[Dict[str, Any]] = []
+        self.objectives: List[Dict[str, Any]] = []
 
         # Subsystems
         self.hud = HUD()
@@ -84,19 +87,26 @@ class GameplayScreen:
 
         # Procedural obstacles (deterministic generation based on tier)
         self.obstacles: List[Tuple[float, float, float]] = []  # x, y, radius
+        self.districts: List[Dict[str, Any]] = []
         self._generate_obstacles()
 
         # Setup callbacks
         self._register_network_callbacks()
 
     def _generate_obstacles(self):
-        """Generates visual ruins/rocks to hide behind."""
+        """Generates visual ruins and district routes to hide behind."""
         random.seed(self.tier_id * 100)
-        # Spawn some grey geometric circles acting as columns
-        for _ in range(40):
+        self.districts = [
+            {"x": 700, "y": 820, "w": 760, "h": 420, "label": "RUINS", "kind": "ruins"},
+            {"x": 2450, "y": 520, "w": 880, "h": 520, "label": "SIGNAL FIELD", "kind": "signal"},
+            {"x": 530, "y": 2520, "w": 940, "h": 620, "label": "BLACK FOG", "kind": "fog"},
+            {"x": 2320, "y": 2460, "w": 1060, "h": 760, "label": "VAULT WARD", "kind": "vault"},
+            {"x": 1650, "y": 1540, "w": 760, "h": 720, "label": "DEAD CENTER", "kind": "center"},
+        ]
+        for _ in range(44):
             ox = random.uniform(100, WORLD_WIDTH - 100)
             oy = random.uniform(100, WORLD_HEIGHT - 100)
-            rad = random.uniform(20, 50)
+            rad = random.uniform(16, 34)
             # Ensure not spawning directly in the center spawning room
             cx, cy = WORLD_WIDTH // 2, WORLD_HEIGHT // 2
             if ((ox - cx)**2 + (oy - cy)**2) ** 0.5 > 200:
@@ -113,6 +123,11 @@ class GameplayScreen:
         self.network.register_callback("snap_back", self._on_snap_back)
         self.network.register_callback("disconnect", self._on_disconnect)
         self.network.register_callback("kicked", self._on_kicked)
+        self.network.register_callback("crystal_list", self._on_crystal_list)
+        self.network.register_callback("hazard_list", self._on_hazard_list)
+        self.network.register_callback("objective_list", self._on_objective_list)
+        self.network.register_callback("crystal_collected", self._on_crystal_collected)
+        self.network.register_callback("objective_completed", self._on_objective_completed)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Socket Event Receivers
@@ -191,6 +206,26 @@ class GameplayScreen:
         self.status_time = time.time()
         self.status_reason = "kicked"
 
+    def _on_crystal_list(self, data):
+        self.crystals = data.get("crystals", [])
+
+    def _on_hazard_list(self, data):
+        self.hazards = data.get("hazards", [])
+
+    def _on_objective_list(self, data):
+        self.objectives = data.get("objectives", [])
+
+    def _on_crystal_collected(self, data):
+        username = data.get("username", "Someone")
+        value = float(data.get("value", 0.0) or 0.0)
+        self.chat.add_message("System", f"{username} collected {value:.2f} CR")
+
+    def _on_objective_completed(self, data):
+        username = data.get("username", "Someone")
+        reward = float(data.get("reward", 0.0) or 0.0)
+        obj = self._format_objective(data.get("objective_type", "objective"))
+        self.chat.add_message("System", f"{username} completed {obj} +{reward:.2f} CR")
+
     # ─────────────────────────────────────────────────────────────────────────────
     # Updates & inputs
     # ─────────────────────────────────────────────────────────────────────────────
@@ -263,8 +298,9 @@ class GameplayScreen:
                 if p_dist < orad + PLAYER_RADIUS:
                     # push back
                     overlap = (orad + PLAYER_RADIUS) - p_dist
-                    dx = (self.self_x - ox) / p_dist
-                    dy = (self.self_y - oy) / p_dist
+                    safe_dist = p_dist or 1.0
+                    dx = (self.self_x - ox) / safe_dist
+                    dy = (self.self_y - oy) / safe_dist
                     self.self_x += dx * overlap
                     self.self_y += dy * overlap
 
@@ -357,10 +393,12 @@ class GameplayScreen:
                 pygame.draw.line(self.screen, COLORS["GRAY"], (x - 3, y), (x + 3, y), 1)
                 pygame.draw.line(self.screen, COLORS["GRAY"], (x, y - 3), (x, y + 3), 1)
 
+        self._draw_districts(offset_x, offset_y)
+        self._draw_routes(offset_x, offset_y)
+
         # Render obstacles
-        for ox, oy, orad in self.obstacles:
-            pygame.draw.circle(self.screen, COLORS["DARK_GRAY"], (int(ox + offset_x), int(oy + offset_y)), int(orad))
-            pygame.draw.circle(self.screen, COLORS["GRAY"], (int(ox + offset_x), int(oy + offset_y)), int(orad), 1)
+        for idx, (ox, oy, orad) in enumerate(self.obstacles):
+            self._draw_map_prop(idx, ox + offset_x, oy + offset_y, orad)
 
         # Render boundary walls
         bx_min = int(offset_x)
@@ -378,6 +416,10 @@ class GameplayScreen:
         draw_particles(self.screen, [
             {**p, "x": p["x"] + offset_x, "y": p["y"] + offset_y} for p in self.particles
         ])
+
+        self._draw_crystals(offset_x, offset_y)
+        self._draw_objectives(offset_x, offset_y)
+        self._draw_hazards(offset_x, offset_y)
 
         # Draw other players
         for pid, p in self.players.items():
@@ -405,6 +447,8 @@ class GameplayScreen:
             is_alive=(self.status != "game_over"),
             font=self.medium_font
         )
+
+        self._draw_goal_pointer(offset_x, offset_y)
 
         # Draw Boss if active
         if self.boss_state and self.boss_state.get("state") != "sleeping":
@@ -449,6 +493,130 @@ class GameplayScreen:
             self._draw_death_overlay()
         elif self.status == "victory":
             self._draw_victory_overlay()
+
+    def _draw_districts(self, offset_x: float, offset_y: float):
+        font = self.small_font = getattr(self, "small_font", pygame.font.SysFont("Inter", 14, bold=True))
+        palettes = {
+            "ruins": ((22, 22, 22), (70, 70, 70), COLORS["GRAY"]),
+            "signal": ((7, 26, 14), (0, 120, 54), COLORS["GREEN"]),
+            "fog": ((5, 5, 5), (80, 80, 80), COLORS["GRAY"]),
+            "vault": ((30, 24, 5), (130, 105, 0), COLORS["YELLOW"]),
+            "center": ((28, 10, 10), (130, 0, 0), COLORS["RED"]),
+        }
+        for zone in self.districts:
+            x = int(zone["x"] + offset_x)
+            y = int(zone["y"] + offset_y)
+            rect = pygame.Rect(x, y, int(zone["w"]), int(zone["h"]))
+            fill, border, text = palettes.get(zone["kind"], palettes["ruins"])
+            overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+            overlay.fill((*fill, 48))
+            self.screen.blit(overlay, rect.topleft)
+            pygame.draw.rect(self.screen, border, rect, 2)
+            label = font.render(zone["label"], True, text)
+            self.screen.blit(label, (x + 14, y + 12))
+
+    def _draw_routes(self, offset_x: float, offset_y: float):
+        center = (WORLD_WIDTH / 2 + offset_x, WORLD_HEIGHT / 2 + offset_y)
+        t = time.time()
+        for idx, zone in enumerate(self.districts):
+            hub = (zone["x"] + zone["w"] / 2 + offset_x, zone["y"] + zone["h"] / 2 + offset_y)
+            color = (70 + int(40 * abs(math.sin(t + idx))),) * 3
+            pygame.draw.line(self.screen, color, center, hub, 2)
+            pygame.draw.circle(self.screen, COLORS["WHITE"], (int(hub[0]), int(hub[1])), 4)
+        pygame.draw.circle(self.screen, COLORS["WHITE"], (int(center[0]), int(center[1])), 44, 2)
+
+    def _draw_map_prop(self, idx: int, x: float, y: float, r: float):
+        kind = idx % 4
+        ix, iy, ir = int(x), int(y), int(r)
+        if kind == 0:
+            points = [(ix, iy - ir), (ix + ir // 2, iy + ir), (ix - ir // 2, iy + ir)]
+            pygame.draw.polygon(self.screen, COLORS["DARK_GRAY"], points)
+            pygame.draw.polygon(self.screen, COLORS["GRAY"], points, 2)
+            pygame.draw.line(self.screen, COLORS["GREEN"], (ix, iy - ir // 2), (ix, iy + ir // 2), 1)
+        elif kind == 1:
+            rect = pygame.Rect(ix - ir, iy - ir // 2, ir * 2, ir)
+            pygame.draw.rect(self.screen, COLORS["DARK_GRAY"], rect, border_radius=2)
+            pygame.draw.rect(self.screen, COLORS["GRAY"], rect, 1, border_radius=2)
+        elif kind == 2:
+            pygame.draw.line(self.screen, COLORS["RED"], (ix - ir, iy - ir), (ix - ir // 3, iy), 3)
+            pygame.draw.line(self.screen, COLORS["RED"], (ix - ir // 3, iy), (ix + ir, iy + ir), 3)
+            pygame.draw.rect(self.screen, COLORS["PANEL_BORDER"], (ix - ir, iy - ir, ir * 2, ir * 2), 1)
+        else:
+            pygame.draw.circle(self.screen, COLORS["YELLOW"], (ix, iy), max(4, ir // 2), 2)
+            pygame.draw.circle(self.screen, COLORS["WHITE"], (ix, iy), 2)
+
+    def _draw_crystals(self, offset_x: float, offset_y: float):
+        for crystal in self.crystals:
+            x = int(float(crystal.get("x", 0)) + offset_x)
+            y = int(float(crystal.get("y", 0)) + offset_y)
+            pulse = int(2 * abs(math.sin(time.time() * 5 + int(crystal.get("id", 0)))))
+            points = [(x, y - 10 - pulse), (x + 8 + pulse, y), (x, y + 10 + pulse), (x - 8 - pulse, y)]
+            pygame.draw.polygon(self.screen, COLORS["YELLOW"], points)
+            pygame.draw.polygon(self.screen, COLORS["WHITE"], points, 1)
+            label = self.small_font.render(f"{float(crystal.get('value', 0.0)):.1f} CR", True, COLORS["WHITE"])
+            self.screen.blit(label, (x - label.get_width() // 2, y - 28))
+
+    def _draw_objectives(self, offset_x: float, offset_y: float):
+        for obj in self.objectives:
+            x = int(float(obj.get("x", 0)) + offset_x)
+            y = int(float(obj.get("y", 0)) + offset_y)
+            radius = int(float(obj.get("radius", 28)))
+            color = self._objective_color(obj.get("type"))
+            pygame.draw.circle(self.screen, color, (x, y), radius, 2)
+            pygame.draw.circle(self.screen, (*color[:3],) if len(color) == 3 else color, (x, y), max(4, radius // 4))
+            glyph = self._objective_glyph(obj.get("type"))
+            glyph_surf = self.medium_font.render(glyph, True, COLORS["WHITE"])
+            self.screen.blit(glyph_surf, (x - glyph_surf.get_width() // 2, y - glyph_surf.get_height() // 2))
+
+    def _draw_hazards(self, offset_x: float, offset_y: float):
+        for hazard in self.hazards:
+            x = int(float(hazard.get("x", 0)) + offset_x)
+            y = int(float(hazard.get("y", 0)) + offset_y)
+            radius = int(float(hazard.get("radius", 80)))
+            pygame.draw.circle(self.screen, COLORS["RED"], (x, y), radius, 2)
+            overlay = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(overlay, (*COLORS["RED"], 28), (radius, radius), radius)
+            self.screen.blit(overlay, (x - radius, y - radius))
+
+    def _draw_goal_pointer(self, offset_x: float, offset_y: float):
+        goal = self._nearest_goal()
+        if not goal:
+            return
+        dx = goal["x"] - self.self_x
+        dy = goal["y"] - self.self_y
+        dist = math.hypot(dx, dy)
+        if dist < 80:
+            return
+        angle = math.atan2(dy, dx)
+        sx = self.self_x + offset_x
+        sy = self.self_y + offset_y
+        px = sx + math.cos(angle) * 70
+        py = sy + math.sin(angle) * 70
+        tip = (px + math.cos(angle) * 12, py + math.sin(angle) * 12)
+        left = (px + math.cos(angle + 2.5) * 10, py + math.sin(angle + 2.5) * 10)
+        right = (px + math.cos(angle - 2.5) * 10, py + math.sin(angle - 2.5) * 10)
+        pygame.draw.polygon(self.screen, COLORS["YELLOW"] if goal["kind"] == "crystal" else COLORS["WHITE"], [tip, left, right])
+        label = self.small_font.render(f"{goal['label']} {int(dist)}m", True, COLORS["WHITE"])
+        self.screen.blit(label, (int(px - label.get_width() // 2), int(py - 28)))
+
+    def _nearest_goal(self) -> Optional[Dict[str, Any]]:
+        goals = []
+        for c in self.crystals:
+            goals.append({"kind": "crystal", "label": "CRYSTAL", "x": float(c.get("x", 0)), "y": float(c.get("y", 0))})
+        for o in self.objectives:
+            goals.append({"kind": "objective", "label": self._format_objective(o.get("type")).upper(), "x": float(o.get("x", 0)), "y": float(o.get("y", 0))})
+        if not goals:
+            return None
+        return min(goals, key=lambda g: math.hypot(g["x"] - self.self_x, g["y"] - self.self_y))
+
+    def _objective_glyph(self, obj_type: str) -> str:
+        return {"scan": "S", "relay": "R", "cache": "C"}.get(obj_type, "?")
+
+    def _objective_color(self, obj_type: str):
+        return {"scan": COLORS["GREEN"], "relay": COLORS["WHITE"], "cache": COLORS["YELLOW"]}.get(obj_type, COLORS["GRAY"])
+
+    def _format_objective(self, obj_type: str) -> str:
+        return {"scan": "scan obelisk", "relay": "signal relay", "cache": "supply cache"}.get(obj_type, "objective")
 
     def _draw_death_overlay(self):
         self.overlay_surf.fill((0, 0, 0, 0))
