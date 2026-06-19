@@ -18,11 +18,13 @@ from config import (
 from assets import (
     draw_player, draw_boss,
     generate_particle, update_particles, draw_particles,
-    draw_boss_warning_overlay, draw_minimap
+    draw_boss_warning_overlay, draw_minimap,
+    create_cyber_floor_tile
 )
 from network import NetworkManager
 from hud import HUD
 from chat import ChatSystem
+from sound import play_sound
 
 
 class GameplayScreen:
@@ -69,6 +71,7 @@ class GameplayScreen:
         # Pre-allocated overlay surface for death/victory fades to avoid per-frame allocations
         self.overlay_surf = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         self.boss_overlay_alpha = 0.0
+        self.cyber_floor_tile = create_cyber_floor_tile()
 
         # Local movement parameters
         self.move_speed = 160.0  # px/s
@@ -169,6 +172,7 @@ class GameplayScreen:
         self.network.register_callback("attack_missed", self._on_attack_missed)
         self.network.register_callback("pvp_reward", self._on_pvp_reward)
         self.network.register_callback("tombstone_list", self._on_tombstone_list)
+        self.network.register_callback("round_start", self._on_round_start)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Socket Event Receivers
@@ -203,6 +207,7 @@ class GameplayScreen:
             if curr_state == "warning":
                 self.shake_remaining_frames = SCREEN_SHAKE_FRAMES
                 self.chat.add_message("ALERT", "The Boss has woken up! Hide/Move immediately.")
+                play_sound("alert")
             elif curr_state == "hunting":
                 self.shake_remaining_frames = SCREEN_SHAKE_FRAMES * 2
                 self.chat.add_message("ALERT", "THE HUNT IS ON!")
@@ -242,14 +247,23 @@ class GameplayScreen:
                 self.particles.append(generate_particle(px, py, COLORS["RED"], speed=2.5))
 
     def _on_game_won(self, data):
-        self.status = "victory"
-        self.status_time = time.time()
+        winner_id = data.get("winner_id")
+        self.winner_username = data.get("username", "Someone")
         self.prize_won = data.get("prize", 0.0)
+        
+        if winner_id == self.self_player_id:
+            self.status = "victory"
+            play_sound("victory")
+        else:
+            self.status = "round_over"
+            play_sound("hit")
+        self.status_time = time.time()
 
     def _on_you_died(self, data):
-        self.status = "game_over"
+        self.status = "respawning"
         self.status_time = time.time()
         self.status_reason = data.get("reason", "boss")
+        play_sound("death")
 
     def _on_snap_back(self, data):
         self.self_x = data.get("x", self.self_x)
@@ -277,6 +291,7 @@ class GameplayScreen:
         username = data.get("username", "Someone")
         value = float(data.get("value", 0.0) or 0.0)
         self.chat.add_message("System", f"{username} collected {value:.2f} CR")
+        play_sound("pickup")
         
         pid = data.get("player_id")
         px, py = None, None
@@ -309,12 +324,19 @@ class GameplayScreen:
                 "reason": rt.get("reason", "unknown"),
             })
 
+    def _on_round_start(self, data):
+        self.status = "playing"
+        self.death_markers = []
+        self.chat.add_message("System", "A new round has started! Fight!")
+        play_sound("victory")
+
     def _on_combat_hit(self, data):
         attacker = data.get("attacker_username", "Someone")
         target = data.get("target_username", "someone")
         hp = int(data.get("target_hp", 0) or 0)
         max_hp = int(data.get("max_hp", 3) or 3)
         self.chat.add_message("Combat", f"{attacker} hit {target} ({hp}/{max_hp} HP)")
+        play_sound("hit")
 
         tid = data.get("target_id")
         if tid in self.players:
@@ -358,12 +380,20 @@ class GameplayScreen:
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         """Processes keystrokes. Returns True if we should quit back to menu."""
+        # Escape key returns to menu
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.network.disconnect()
+            return True
+
         # Check game over exits
-        if self.status != "playing":
+        if self.status == "game_over" or self.status == "victory":
             if event.type == pygame.KEYDOWN or event.type == pygame.MOUSEBUTTONDOWN:
-                if time.time() - self.status_time > 2.0:
+                if time.time() - self.status_time > 5.0:
                     self.network.disconnect()
                     return True
+            return False
+
+        if self.status == "respawning":
             return False
 
         # Route to chat input first
@@ -394,11 +424,19 @@ class GameplayScreen:
         self.last_attack_time = now
         self.network.send_attack()
         self.chat.add_message("Combat", "Attack")
+        play_sound("shoot")
         for _ in range(5):
             self.particles.append(generate_particle(self.self_x, self.self_y, COLORS["WHITE"], speed=1.4))
 
     def update(self, dt: float):
-        if self.status != "playing":
+        if self.status == "respawning":
+            self.particles = update_particles(self.particles, dt)
+            if time.time() - self.status_time >= 3.0:
+                self.network.send_respawn()
+                self.status = "playing"
+            return
+
+        if self.status != "playing" and self.status != "victory" and self.status != "round_over":
             # Just drift particles
             self.particles = update_particles(self.particles, dt)
             return
@@ -534,29 +572,13 @@ class GameplayScreen:
         offset_x = self.width / 2 - cam_x_shaked
         offset_y = self.height / 2 - cam_y_shaked
 
-        # Draw dynamic grid inside the visible screen viewport (super fast 60FPS)
-        self.screen.fill(COLORS["BG"])
-        
-        # Grid line spacing
-        grid_size = 80
-        
-        # Start coordinates aligned to the camera scroll offset
-        start_x = int(offset_x) % grid_size
-        start_y = int(offset_y) % grid_size
-        
-        # Draw vertical lines that are within screen bounds
-        for x in range(start_x, self.width + grid_size, grid_size):
-            pygame.draw.line(self.screen, COLORS["DARK_GRAY"], (x, 0), (x, self.height), 1)
-            
-        # Draw horizontal lines that are within screen bounds
-        for y in range(start_y, self.height + grid_size, grid_size):
-            pygame.draw.line(self.screen, COLORS["DARK_GRAY"], (0, y), (self.width, y), 1)
-
-        # Draw intersection markers/crosses
-        for x in range(start_x, self.width + grid_size, grid_size):
-            for y in range(start_y, self.height + grid_size, grid_size):
-                pygame.draw.line(self.screen, COLORS["GRAY"], (x - 3, y), (x + 3, y), 1)
-                pygame.draw.line(self.screen, COLORS["GRAY"], (x, y - 3), (x, y + 3), 1)
+        # Tiled cyber floor background rendering (super fast, cached)
+        tile_size = 256
+        start_tile_x = int(offset_x) % tile_size - tile_size
+        start_tile_y = int(offset_y) % tile_size - tile_size
+        for x in range(start_tile_x, self.width + tile_size, tile_size):
+            for y in range(start_tile_y, self.height + tile_size, tile_size):
+                self.screen.blit(self.cyber_floor_tile, (x, y))
 
         self._draw_districts(offset_x, offset_y)
         self._draw_routes(offset_x, offset_y)
@@ -712,6 +734,10 @@ class GameplayScreen:
             self._draw_death_overlay()
         elif self.status == "victory":
             self._draw_victory_overlay()
+        elif self.status == "respawning":
+            self._draw_respawn_overlay()
+        elif self.status == "round_over":
+            self._draw_round_over_overlay()
 
     def _draw_districts(self, offset_x: float, offset_y: float):
         font = self.small_font = getattr(self, "small_font", pygame.font.SysFont("Inter", 14, bold=True))
@@ -1001,3 +1027,34 @@ class GameplayScreen:
 
         ext = self.medium_font.render("Press any key to return to Main Menu", True, COLORS["GRAY"])
         self.screen.blit(ext, (self.width // 2 - ext.get_width() // 2, self.height // 2 + 120))
+
+    def _draw_respawn_overlay(self):
+        self.overlay_surf.fill((0, 0, 0, 0))
+        # Fade to dark crimson red
+        alpha = min(180, int((time.time() - self.status_time) * 150))
+        self.overlay_surf.fill((15, 0, 0, alpha))
+        self.screen.blit(self.overlay_surf, (0, 0))
+
+        # Show respawn counter
+        time_left = max(1, 3 - int(time.time() - self.status_time))
+        lbl = self.giant_font.render(f"RESPAWNING IN {time_left}...", True, COLORS["RED"])
+        self.screen.blit(lbl, (self.width // 2 - lbl.get_width() // 2, self.height // 2 - 50))
+        
+        sub = self.large_font.render("Prepare to fight back!", True, COLORS["WHITE"])
+        self.screen.blit(sub, (self.width // 2 - sub.get_width() // 2, self.height // 2 + 20))
+
+    def _draw_round_over_overlay(self):
+        self.overlay_surf.fill((0, 0, 0, 0))
+        # Fade to dark gray
+        alpha = min(200, int((time.time() - self.status_time) * 100))
+        self.overlay_surf.fill((10, 10, 12, alpha))
+        self.screen.blit(self.overlay_surf, (0, 0))
+
+        lbl = self.giant_font.render("ROUND OVER", True, COLORS["WHITE"])
+        self.screen.blit(lbl, (self.width // 2 - lbl.get_width() // 2, self.height // 2 - 80))
+
+        sub = self.large_font.render(f"Winner: {self.winner_username}", True, COLORS["YELLOW"])
+        self.screen.blit(sub, (self.width // 2 - sub.get_width() // 2, self.height // 2 + 10))
+
+        ext = self.medium_font.render("Press ESC to exit to Lobby, or wait for next round...", True, COLORS["GRAY"])
+        self.screen.blit(ext, (self.width // 2 - ext.get_width() // 2, self.height // 2 + 80))

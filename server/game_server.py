@@ -161,16 +161,67 @@ async def check_win_condition(tier_id: int):
             "prize": prize_pool
         })
 
-        # Disconnect clients in the room to force lobby reset
-        to_disconnect = list(tier_connections[tier_id].keys())
-        for conn in to_disconnect:
-            try:
-                await conn.close()
-            except Exception:
-                pass
-
         # Reset tombstones for the next round
         tier_tombstones[tier_id] = []
+
+        # Start a round reset task instead of disconnecting everyone!
+        asyncio.create_task(reset_round_after_delay(tier_id))
+
+
+async def reset_round_after_delay(tier_id: int, delay: float = 5.0):
+    """Resets the round for all players in a tier after a short victory celebration."""
+    await asyncio.sleep(delay)
+    
+    import random
+    obstacles = get_obstacles()
+    
+    async with database.aiosqlite.connect(database.DATABASE_URL) as db:
+        for conn, client_info in list(tier_connections[tier_id].items()):
+            player_id = client_info["player_id"]
+            
+            # Spawn at a new random position
+            spawn_x = float(random.randint(500, WORLD_WIDTH - 500))
+            spawn_y = float(random.randint(500, WORLD_HEIGHT - 500))
+            
+            client_info["is_alive"] = True
+            client_info["hp"] = PLAYER_MAX_HP
+            client_info["x"] = spawn_x
+            client_info["y"] = spawn_y
+            client_info["last_move_time"] = time.time()
+            
+            # Reset active session in DB to make sure they are alive
+            await db.execute(
+                "UPDATE tier_sessions SET is_alive=1, entry_time=unixepoch() WHERE player_id=? AND tier_id=?",
+                (player_id, tier_id)
+            )
+            
+            # Send snapback/reset to client
+            try:
+                await conn.send(json.dumps({
+                    "type": "snap_back",
+                    "x": spawn_x,
+                    "y": spawn_y
+                }))
+            except Exception:
+                pass
+        await db.commit()
+        
+    # Reset tombstones
+    tier_tombstones[tier_id] = []
+    
+    # Clear and respawn crystals
+    tier_crystals[tier_id] = []
+    for _ in range(5):
+        await spawn_crystal(tier_id, obstacles)
+        
+    # Broadcast round start and new crystals
+    await broadcast_to_tier(tier_id, {
+        "type": "round_start"
+    })
+    await broadcast_to_tier(tier_id, {
+        "type": "crystal_list",
+        "crystals": tier_crystals[tier_id]
+    })
 
 
 async def broadcast_to_tier(tier_id: int, message: dict):
@@ -505,6 +556,40 @@ async def handle_connection(websocket, path=None):
                         "x": client_info["x"],
                         "y": client_info["y"]
                     })
+
+            elif msg_type == "respawn":
+                import random
+                # Reset health and mark alive
+                client_info["is_alive"] = True
+                client_info["hp"] = PLAYER_MAX_HP
+                # Set a new random position
+                client_info["x"] = float(random.randint(500, WORLD_WIDTH - 500))
+                client_info["y"] = float(random.randint(500, WORLD_HEIGHT - 500))
+                client_info["last_move_time"] = time.time()
+                
+                # Update database to mark tier session is_alive=1 again
+                async with database.aiosqlite.connect(database.DATABASE_URL) as db:
+                    await db.execute(
+                        "UPDATE tier_sessions SET is_alive=1 WHERE player_id=? AND tier_id=? AND is_alive=0",
+                        (player_id, tier_id)
+                    )
+                    await db.commit()
+                
+                # Send snapback/reset to this player
+                await websocket.send(json.dumps({
+                    "type": "snap_back",
+                    "x": client_info["x"],
+                    "y": client_info["y"]
+                }))
+                
+                # Broadcast player respawn update to all tier players
+                await broadcast_to_tier(tier_id, {
+                    "type": "player_respawned",
+                    "player_id": player_id,
+                    "username": username,
+                    "x": client_info["x"],
+                    "y": client_info["y"]
+                })
 
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))

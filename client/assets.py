@@ -314,7 +314,31 @@ def draw_minimap(
     view_x = map_x + int((camera_x - scr_w / 2) * scale_x)
     view_y = map_y + int((camera_y - scr_h / 2) * scale_y)
     
-    # Clip rectangle
-    rx = max(map_x, min(view_x, map_x + MINIMAP_WIDTH - int(view_w_px)))
-    ry = max(map_y, min(view_y, map_y + MINIMAP_HEIGHT - int(view_h_px)))
     pygame.draw.rect(surface, COLORS["WHITE"], (rx, ry, int(view_w_px), int(view_h_px)), 1)
+
+
+def create_cyber_floor_tile() -> pygame.Surface:
+    """Generates a beautiful cyber tech metal plate tile for the arena floor."""
+    tile = pygame.Surface((256, 256))
+    tile.fill((12, 12, 16))
+    pygame.draw.rect(tile, (22, 26, 36), (0, 0, 256, 256), 2)
+    pygame.draw.line(tile, (16, 20, 28), (0, 0), (256, 256), 1)
+    pygame.draw.line(tile, (16, 20, 28), (256, 0), (0, 256), 1)
+    pygame.draw.circle(tile, (18, 22, 30), (128, 128), 64, 1)
+    pygame.draw.circle(tile, (18, 22, 30), (128, 128), 12, 1)
+    
+    pygame.draw.line(tile, (0, 48, 32), (32, 64), (96, 64), 1)
+    pygame.draw.line(tile, (0, 48, 32), (96, 64), (128, 96), 1)
+    pygame.draw.circle(tile, (0, 80, 60), (32, 64), 2)
+    pygame.draw.circle(tile, (0, 80, 60), (128, 96), 2)
+    
+    pygame.draw.line(tile, (48, 36, 0), (224, 192), (160, 192), 1)
+    pygame.draw.line(tile, (48, 36, 0), (160, 192), (128, 160), 1)
+    pygame.draw.circle(tile, (80, 60, 0), (224, 192), 2)
+    pygame.draw.circle(tile, (80, 60, 0), (128, 160), 2)
+    
+    pygame.draw.circle(tile, (28, 32, 42), (8, 8), 2)
+    pygame.draw.circle(tile, (28, 32, 42), (248, 8), 2)
+    pygame.draw.circle(tile, (28, 32, 42), (8, 248), 2)
+    pygame.draw.circle(tile, (28, 32, 42), (248, 248), 2)
+    return tile

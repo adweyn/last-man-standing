@@ -243,6 +243,10 @@ class NetworkManager:
         """Enqueues a melee attack. Server chooses the valid target."""
         self.send_queue.put({"type": "attack"})
 
+    def send_respawn(self):
+        """Enqueues a respawn request when dead."""
+        self.send_queue.put({"type": "respawn"})
+
     def register_callback(self, event_name: str, callback: Callable):
         if event_name in self.callbacks:
             self.callbacks[event_name] = callback

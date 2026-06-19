@@ -24,6 +24,8 @@ def main():
     
     pygame.init()
     pygame.mixer.init()  # Initialize audio engine in case sound needs to be added later
+    from sound import init_synth_sounds
+    init_synth_sounds()
 
     # Create Pygame window
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
