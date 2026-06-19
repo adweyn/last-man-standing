@@ -1,0 +1,4 @@
+{
+  "server_api_url": "https://your-render-app.onrender.com",
+  "server_ws_url": "wss://your-render-app.onrender.com/ws"
+}

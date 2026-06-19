@@ -12,6 +12,13 @@ server/lms_game.db
 # Secrets
 .env
 server/.env
+client/client_settings.json
+
+# Desktop build artifacts
+client/build/
+client/dist/
+client/release/
+client/*.spec
 
 # IDE / OS metadata
 .vscode/

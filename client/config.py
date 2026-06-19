@@ -1,10 +1,42 @@
 # config.py — Last Man Standing Client Configuration
 
+import json
+import os
+import sys
+from pathlib import Path
+
 import pygame
 
 # ─── Network ──────────────────────────────────────────────────────────────────
-SERVER_WS_URL  = "ws://localhost:8765"
-SERVER_API_URL = "http://localhost:8000"
+def _runtime_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _load_client_settings() -> dict:
+    settings_path = _runtime_dir() / "client_settings.json"
+    if not settings_path.exists():
+        return {}
+    try:
+        return json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+_settings = _load_client_settings()
+
+SERVER_API_URL = (
+    os.getenv("LMS_SERVER_API_URL")
+    or _settings.get("server_api_url")
+    or "http://localhost:8000"
+).rstrip("/")
+
+SERVER_WS_URL = (
+    os.getenv("LMS_SERVER_WS_URL")
+    or _settings.get("server_ws_url")
+    or "ws://localhost:8765"
+).rstrip("/")
 
 # ─── Display ──────────────────────────────────────────────────────────────────
 SCREEN_WIDTH  = 1280
