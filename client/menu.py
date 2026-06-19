@@ -256,6 +256,26 @@ class MainMenu:
 
         # ─── TIER SELECTION LOBBY ────────────────────────────────────────────────
         elif self.state == "tier_select":
+            # Daily check-in button click
+            btn_w = 280
+            btn_h = 30
+            btn_x = cx - btn_w // 2
+            btn_y = 210
+            if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
+                daily_claimed = False
+                if self.player_profile:
+                    daily_claimed = bool(self.player_profile.get("daily_claimed", False))
+                if not daily_claimed:
+                    success, reward, err_msg = self.network.claim_daily_bonus()
+                    if success:
+                        self.status_msg = f"Daily bonus claimed: +{reward:.2f} CR!"
+                        self.status_color = COLORS["GREEN"]
+                        self.refresh_lobby_data()
+                    else:
+                        self.status_msg = err_msg
+                        self.status_color = COLORS["RED"]
+                return None
+
             # Three cards horizontally
             card_w = 230
             card_h = 250
@@ -405,6 +425,20 @@ class MainMenu:
         
         bal_txt = self.large_font.render(f"CREDIT BALANCE: {bal:.2f} CR", True, COLORS["WHITE"])
         self.screen.blit(bal_txt, (cx - bal_txt.get_width() // 2, 175))
+
+        # Daily check-in bonus button
+        daily_claimed = False
+        if self.player_profile:
+            daily_claimed = bool(self.player_profile.get("daily_claimed", False))
+        
+        btn_w = 280
+        btn_h = 30
+        btn_x = cx - btn_w // 2
+        btn_y = 210
+        if daily_claimed:
+            self._draw_small_button("DAILY BONUS CLAIMED", btn_x, btn_y, btn_w, btn_h, active=False)
+        else:
+            self._draw_small_button("CLAIM DAILY BONUS (+0.15 CR)", btn_x, btn_y, btn_w, btn_h, active=True)
 
         # Horizontal tier cards
         card_w = 230

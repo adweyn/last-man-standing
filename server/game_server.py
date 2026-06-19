@@ -47,6 +47,10 @@ hazard_id_counter = 0
 tier_objectives: Dict[int, list] = {1: [], 2: [], 3: []}
 objective_id_counter = 0
 
+# Persistent tombstones on the map per tier:
+# { tier_id: [ { id, username, x, y, reason, time } ] }
+tier_tombstones: Dict[int, list] = {1: [], 2: [], 3: []}
+
 # Global reference to BossAI instances per tier. Set during startup.
 boss_instances: Dict[int, Any] = {}
 
@@ -64,11 +68,15 @@ async def kill_player_in_game(player_id: int, tier_id: int, reason: str = "boss"
     # 2. Update memory state & notify socket if online
     target_conn = None
     target_username = "Unknown"
+    target_x = None
+    target_y = None
     for conn, client_info in tier_connections[tier_id].items():
         if client_info["player_id"] == player_id:
             client_info["is_alive"] = False
             target_conn = conn
             target_username = client_info["username"]
+            target_x = client_info.get("x")
+            target_y = client_info.get("y")
             break
 
     # Send push notification if they have FCM token
@@ -81,9 +89,28 @@ async def kill_player_in_game(player_id: int, tier_id: int, reason: str = "boss"
         "type": "player_eliminated",
         "player_id": player_id,
         "username": target_username,
-        "reason": reason
+        "reason": reason,
+        "x": target_x,
+        "y": target_y
     }
     await broadcast_to_tier(tier_id, payload)
+
+    # Create persistent tombstone in memory for this tier
+    tombstone = {
+        "id": player_id,
+        "username": target_username,
+        "x": target_x if target_x is not None else (client_info["x"] if target_conn else 2000.0),
+        "y": target_y if target_y is not None else (client_info["y"] if target_conn else 2000.0),
+        "reason": reason,
+        "time": time.time()
+    }
+    tier_tombstones[tier_id].append(tombstone)
+
+    # Broadcast updated tombstones list to all clients in the tier
+    await broadcast_to_tier(tier_id, {
+        "type": "tombstone_list",
+        "tombstones": tier_tombstones[tier_id]
+    })
 
     # Disconnect or send dead state
     if target_conn:
@@ -141,6 +168,9 @@ async def check_win_condition(tier_id: int):
                 await conn.close()
             except Exception:
                 pass
+
+        # Reset tombstones for the next round
+        tier_tombstones[tier_id] = []
 
 
 async def broadcast_to_tier(tier_id: int, message: dict):
@@ -228,6 +258,9 @@ async def handle_connection(websocket, path=None):
             "x": spawn_x,
             "y": spawn_y,
             "last_move_time": time.time(),
+            "last_attack_time": 0.0,
+            "hp": PLAYER_MAX_HP,
+            "max_hp": PLAYER_MAX_HP,
             "is_alive": True
         }
         tier_connections[tier_id][websocket] = client_info
@@ -261,6 +294,16 @@ async def handle_connection(websocket, path=None):
         await websocket.send(json.dumps({
             "type": "objective_list",
             "objectives": tier_objectives[tier_id]
+        }))
+
+        await websocket.send(json.dumps({
+            "type": "death_trap_list",
+            "traps": get_death_traps()
+        }))
+
+        await websocket.send(json.dumps({
+            "type": "tombstone_list",
+            "tombstones": tier_tombstones[tier_id]
         }))
 
         # 4. RECEIVE LOOP
@@ -318,6 +361,16 @@ async def handle_connection(websocket, path=None):
                 # Increment explorer daily quest progress (distance traveled)
                 if dist_actual > 0:
                     asyncio.create_task(database.increment_quest_progress(player_id, "explorer", dist_actual))
+
+                # Permanent lethal caves/pits. Server-side so clients cannot ignore them.
+                for trap in get_death_traps():
+                    t_dist = ((new_x - trap["x"]) ** 2 + (new_y - trap["y"]) ** 2) ** 0.5
+                    if t_dist < trap["radius"] + 8:
+                        await kill_player_in_game(player_id, tier_id, trap["type"])
+                        break
+
+                if not client_info["is_alive"]:
+                    continue
 
                 # Check collision with crystals
                 collected_crystals = []
@@ -385,6 +438,58 @@ async def handle_connection(websocket, path=None):
                     if len(tier_objectives[tier_id]) < 3:
                         await spawn_objective(tier_id, get_obstacles(), near=(new_x, new_y))
 
+            elif msg_type == "attack":
+                if not client_info["is_alive"]:
+                    continue
+
+                now = time.time()
+                if now - client_info.get("last_attack_time", 0.0) < PLAYER_ATTACK_COOLDOWN:
+                    continue
+                client_info["last_attack_time"] = now
+
+                target_conn = None
+                target_info = None
+                best_dist = PLAYER_ATTACK_RANGE
+                for other_conn, other in tier_connections[tier_id].items():
+                    if other_conn == websocket or not other.get("is_alive"):
+                        continue
+                    dist = ((client_info["x"] - other["x"]) ** 2 + (client_info["y"] - other["y"]) ** 2) ** 0.5
+                    if dist <= best_dist:
+                        target_conn = other_conn
+                        target_info = other
+                        best_dist = dist
+
+                if not target_info:
+                    await websocket.send(json.dumps({
+                        "type": "attack_missed",
+                        "cooldown": PLAYER_ATTACK_COOLDOWN
+                    }))
+                    continue
+
+                target_info["hp"] = max(0, int(target_info.get("hp", PLAYER_MAX_HP)) - 1)
+                await broadcast_to_tier(tier_id, {
+                    "type": "combat_hit",
+                    "attacker_id": player_id,
+                    "attacker_username": username,
+                    "target_id": target_info["player_id"],
+                    "target_username": target_info["username"],
+                    "target_hp": target_info["hp"],
+                    "max_hp": PLAYER_MAX_HP,
+                    "x": target_info["x"],
+                    "y": target_info["y"],
+                    "damage": 1
+                })
+
+                if target_info["hp"] <= 0:
+                    await database.update_balance(player_id, PLAYER_ATTACK_REWARD)
+                    await broadcast_to_tier(tier_id, {
+                        "type": "pvp_reward",
+                        "player_id": player_id,
+                        "username": username,
+                        "value": PLAYER_ATTACK_REWARD
+                    })
+                    await kill_player_in_game(target_info["player_id"], tier_id, "pvp")
+
             elif msg_type == "chat":
                 chat_text = str(msg.get("message", ""))[:120].strip()
                 # Sanitize: strip HTML tags and shell-like chars
@@ -394,8 +499,11 @@ async def handle_connection(websocket, path=None):
                 if chat_text:
                     await broadcast_to_tier(tier_id, {
                         "type": "chat_message",
+                        "player_id": player_id,
                         "username": username,
-                        "message": chat_text
+                        "message": chat_text,
+                        "x": client_info["x"],
+                        "y": client_info["y"]
                     })
 
             elif msg_type == "ping":
@@ -426,6 +534,8 @@ async def player_broadcast_loop():
                         "username": client["username"],
                         "x": client["x"],
                         "y": client["y"],
+                        "hp": client.get("hp", PLAYER_MAX_HP),
+                        "max_hp": client.get("max_hp", PLAYER_MAX_HP),
                         "is_alive": client["is_alive"]
                     })
                 await broadcast_to_tier(tier_id, {
@@ -475,6 +585,11 @@ async def start_websocket_server():
 import math
 import random
 
+PLAYER_MAX_HP = 3
+PLAYER_ATTACK_RANGE = 52.0
+PLAYER_ATTACK_COOLDOWN = 0.9
+PLAYER_ATTACK_REWARD = 0.35
+
 def get_obstacles() -> list[dict]:
     """Generates the same deterministic obstacles list as the web client."""
     obstacles = []
@@ -493,6 +608,33 @@ def get_obstacles() -> list[dict]:
         if dist > 280 and not in_spawn_lane:
             obstacles.append({"x": ox, "y": oy, "rad": rad})
     return obstacles
+
+
+def get_death_traps() -> list[dict]:
+    """Deterministic lethal caves/pits shared by every client."""
+    traps = []
+    for i in range(9):
+        seed_a = (math.sin(i * 211.37 + 12.4) * 30123.817) % 1
+        seed_b = (math.sin(i * 97.81 + 33.2) * 18291.441) % 1
+        seed_c = (math.sin(i * 404.19 + 7.8) * 9911.27) % 1
+        x = 180.0 + seed_a * (WORLD_WIDTH - 360)
+        y = 180.0 + seed_b * (WORLD_HEIGHT - 360)
+        radius = 34.0 + seed_c * 22
+        if not isInsideSpawnLane_py(x, y):
+            traps.append({
+                "id": i + 1,
+                "type": "cave" if i % 2 else "pit",
+                "x": x,
+                "y": y,
+                "radius": radius,
+            })
+    return traps
+
+
+def isInsideSpawnLane_py(x: float, y: float) -> bool:
+    dx = abs(x - WORLD_WIDTH / 2)
+    dy = abs(y - WORLD_HEIGHT / 2)
+    return dx < 260 and dy < 780
 
 
 def is_clean_map_spot(x: float, y: float, radius: float, obstacles: list[dict]) -> bool:

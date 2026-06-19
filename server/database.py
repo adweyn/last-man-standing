@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     created_at  REAL    NOT NULL DEFAULT (unixepoch()),
     paid_at     REAL
 );
+
+CREATE TABLE IF NOT EXISTS daily_claims (
+    player_id   INTEGER NOT NULL REFERENCES players(id),
+    claim_date  TEXT    NOT NULL,  -- YYYY-MM-DD
+    reward      REAL    NOT NULL,
+    PRIMARY KEY (player_id, claim_date)
+);
 """
 
 
@@ -609,3 +616,43 @@ async def claim_quest_reward(player_id: int, quest_type: str) -> Optional[float]
             return quest["reward"]
 
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Daily Login Reward (Check-in)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def claim_daily_bonus(player_id: int) -> float:
+    """Claims a daily bonus of 0.15 CR if not claimed today. Returns reward amount or 0.0 if already claimed."""
+    today = date.today().isoformat()
+    reward = 0.15
+    try:
+        async with aiosqlite.connect(DATABASE_URL) as db:
+            # Спробуємо вставити
+            await db.execute(
+                "INSERT INTO daily_claims (player_id, claim_date, reward) VALUES (?, ?, ?)",
+                (player_id, today, reward)
+            )
+            # Оновимо баланс гравця
+            await db.execute(
+                "UPDATE players SET balance = balance + ? WHERE id = ?",
+                (reward, player_id)
+            )
+            await db.commit()
+            return reward
+    except aiosqlite.IntegrityError:
+        # Вже клеймив сьогодні
+        return 0.0
+
+
+async def is_daily_bonus_claimed(player_id: int) -> bool:
+    """Checks if the user has already claimed their daily check-in bonus today."""
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        async with db.execute(
+            "SELECT 1 FROM daily_claims WHERE player_id = ? AND claim_date = ?",
+            (player_id, today)
+        ) as cur:
+            row = await cur.fetchone()
+            return row is not None
+

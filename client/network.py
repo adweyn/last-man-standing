@@ -47,7 +47,12 @@ class NetworkManager:
             "hazard_list": None,
             "objective_list": None,
             "crystal_collected": None,
-            "objective_completed": None
+            "objective_completed": None,
+            "death_trap_list": None,
+            "combat_hit": None,
+            "attack_missed": None,
+            "pvp_reward": None,
+            "tombstone_list": None
         }
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -117,6 +122,22 @@ class NetworkManager:
                 return True, data.get("new_balance", 0.0), ""
             else:
                 err = resp.json().get("detail", "Deposit failed")
+                return False, 0.0, str(err)
+        except requests.RequestException as e:
+            return False, 0.0, f"Connection error: {str(e)}"
+
+    def claim_daily_bonus(self) -> tuple[bool, float, str]:
+        """Claims a daily free credit reward once every 24 hours. Returns (success, reward, error_msg)."""
+        if not self.auth_token:
+            return False, 0.0, "Not authenticated"
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        try:
+            resp = requests.post(f"{SERVER_API_URL}/daily-claim", headers=headers, timeout=HTTP_TIMEOUT)
+            if resp.status_code == 200:
+                data = resp.json()
+                return True, float(data.get("reward", 0.15)), ""
+            else:
+                err = resp.json().get("detail", "Claim failed")
                 return False, 0.0, str(err)
         except requests.RequestException as e:
             return False, 0.0, f"Connection error: {str(e)}"
@@ -217,6 +238,10 @@ class NetworkManager:
     def send_chat(self, msg: str):
         """Enqueues chat message."""
         self.send_queue.put({"type": "chat", "message": msg})
+
+    def send_attack(self):
+        """Enqueues a melee attack. Server chooses the valid target."""
+        self.send_queue.put({"type": "attack"})
 
     def register_callback(self, event_name: str, callback: Callable):
         if event_name in self.callbacks:

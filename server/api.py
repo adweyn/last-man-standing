@@ -75,6 +75,16 @@ async def get_landing_page():
     return FileResponse(os.path.join(static_dir, "landing.html"))
 
 
+@app.get("/landing.css")
+async def get_landing_css():
+    return FileResponse(os.path.join(static_dir, "landing.css"), media_type="text/css")
+
+
+@app.get("/landing-hero.png")
+async def get_landing_hero():
+    return FileResponse(os.path.join(static_dir, "landing-hero.png"), media_type="image/png")
+
+
 @app.get("/download/windows")
 async def download_windows_client():
     file_path = os.path.join(static_dir, "downloads", "LastManStanding-Windows.zip")
@@ -309,6 +319,7 @@ async def get_profile(player: dict = Depends(get_current_player)):
                 active_session = dict(row)
 
     daily_moves = await database.get_daily_moves(player["id"])
+    daily_claimed = await database.is_daily_bonus_claimed(player["id"])
 
     return {
         "id": player["id"],
@@ -320,7 +331,24 @@ async def get_profile(player: dict = Depends(get_current_player)):
         "chaos_tickets": player.get("chaos_tickets", 0),
         "fcm_registered": bool(player["fcm_token"]),
         "active_session": active_session,
-        "daily_moves_today": daily_moves
+        "daily_moves_today": daily_moves,
+        "daily_claimed": daily_claimed
+    }
+
+
+@app.post("/daily-claim")
+async def claim_daily(player: dict = Depends(get_current_player)):
+    """Claim a daily free credit reward once every 24 hours."""
+    reward = await database.claim_daily_bonus(player["id"])
+    if reward <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="You have already claimed your daily bonus today. Come back tomorrow!"
+        )
+    return {
+        "message": "Daily bonus claimed successfully!",
+        "reward": reward,
+        "new_balance": round(player["balance"] + reward, 2)
     }
 
 

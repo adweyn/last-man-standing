@@ -30,13 +30,13 @@ _settings = _load_client_settings()
 SERVER_API_URL = (
     os.getenv("LMS_SERVER_API_URL")
     or _settings.get("server_api_url")
-    or "http://localhost:8000"
+    or "https://last-man-standing-koo9.onrender.com"
 ).rstrip("/")
 
 SERVER_WS_URL = (
     os.getenv("LMS_SERVER_WS_URL")
     or _settings.get("server_ws_url")
-    or "ws://localhost:8765"
+    or "wss://last-man-standing-koo9.onrender.com/ws"
 ).rstrip("/")
 
 # ─── Display ──────────────────────────────────────────────────────────────────

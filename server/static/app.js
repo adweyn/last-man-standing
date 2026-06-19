@@ -48,6 +48,81 @@ let bossState = { state: 'sleeping', x: 0, y: 0, targetX: 0, targetY: 0, time_re
 let hazardZones = [];
 let crystals = [];
 let mapObjectives = [];
+let tombstones = [];
+let deathTraps = [];
+let speechBubbles = new Map(); // player_id -> { text, expires }
+let treeList = [];
+let bushList = [];
+
+const NPCS = [
+    {
+        id: 'npc_sentry',
+        name: 'Sentry-7',
+        x: WORLD_WIDTH / 2 + 60,
+        y: WORLD_HEIGHT / 2 - 120,
+        color: '#00ffff',
+        phrases: [
+            'Watch the sky. When the red flash starts, the Boss is coming!',
+            'Complete your daily moves quota (2/2) to avoid AFK elimination.',
+            'Crystals are the key to credits. Grab them fast!',
+            'Be careful in the Ruins, it is a PVP zone.',
+            'Need credits? Try claiming the daily bonus in the lobby!'
+        ],
+        lastTalk: Date.now() + 2000,
+        talkCooldown: 12000
+    },
+    {
+        id: 'npc_bob',
+        name: 'Scavenger Bob',
+        x: 950,
+        y: 950,
+        color: '#ccaa00',
+        phrases: [
+            'I found a huge crystal cluster near the Dead Center yesterday.',
+            'Watch out for the lethal caves! They look like purple portals.',
+            'PVP gives 0.35 CR per kill. High risk, high reward!',
+            'Don\'t step into the black fog, you will be blinded.',
+            'Stay active, lazy pilots get purged!'
+        ],
+        lastTalk: Date.now() + 5000,
+        talkCooldown: 15000
+    },
+    {
+        id: 'npc_dealer',
+        name: 'Dealer Matrix',
+        x: 2500,
+        y: 2600,
+        color: '#ff00ff',
+        phrases: [
+            'Wanna trade? Telegram Stars can get you credits instantly.',
+            'Premium status gives you extra starting tickets.',
+            'Claim your Daily Bonus in the lobby to get free credits!',
+            'Survival is expensive, but dying is free.',
+            'Hide in green bushes if you need to escape from others!'
+        ],
+        lastTalk: Date.now() + 8000,
+        talkCooldown: 14000
+    }
+];
+
+function wrapText(context, text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0] || '';
+
+    for (let i = 1; i < words.length; i++) {
+        const word = words[i];
+        const width = context.measureText(currentLine + " " + word).width;
+        if (width < maxWidth) {
+            currentLine += " " + word;
+        } else {
+            lines.push(currentLine);
+            currentLine = word;
+        }
+    }
+    lines.push(currentLine);
+    return lines;
+}
 
 // Physics / Viewport
 let camX = selfX;
@@ -86,6 +161,7 @@ const btnExitGame = document.getElementById('btn-exit-game');
 const btnQuests = document.getElementById('btn-quests');
 const btnFocusShop = document.getElementById('btn-focus-shop');
 const btnStartRun = document.getElementById('btn-start-run');
+const btnDailyClaim = document.getElementById('btn-daily-claim');
 
 const balanceValue = document.getElementById('balance-value');
 const premiumValue = document.getElementById('premium-value');
@@ -309,6 +385,27 @@ async function fetchLobbyData() {
             updateRunRecommendation();
             updateSelectedTierUI();
             await fetchShopProducts();
+
+            // Sync daily claim button state
+            if (btnDailyClaim) {
+                if (userProfile.daily_claimed) {
+                    btnDailyClaim.textContent = 'CLAIMED';
+                    btnDailyClaim.disabled = true;
+                    btnDailyClaim.classList.remove('ready');
+                    btnDailyClaim.classList.add('disabled');
+                    btnDailyClaim.style.background = '#333';
+                    btnDailyClaim.style.borderColor = '#333';
+                    btnDailyClaim.style.boxShadow = 'none';
+                } else {
+                    btnDailyClaim.textContent = 'CLAIM';
+                    btnDailyClaim.disabled = false;
+                    btnDailyClaim.classList.add('ready');
+                    btnDailyClaim.classList.remove('disabled');
+                    btnDailyClaim.style.background = '#0099ff';
+                    btnDailyClaim.style.borderColor = '#0099ff';
+                    btnDailyClaim.style.boxShadow = '0 0 8px rgba(0,153,255,0.45)';
+                }
+            }
         }
 
         // Fetch Tier Stats
@@ -586,6 +683,29 @@ if (btnDeposit) {
     });
 }
 
+if (btnDailyClaim) {
+    btnDailyClaim.addEventListener('click', async () => {
+        try {
+            const resp = await fetch(`${SERVER_API_URL}/daily-claim`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                }
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                showToast(data.detail || 'Failed to claim bonus', 'error');
+                return;
+            }
+            showToast(`Claimed +${Number(data.reward).toFixed(2)} CR!`, 'success');
+            await fetchLobbyData();
+        } catch (e) {
+            showToast('Connection failed', 'error');
+        }
+    });
+}
+
 
 // ─── TOURNAMENT JOINING & WEBSOCKETS ───
 async function joinTierTournament(tier) {
@@ -732,6 +852,10 @@ function connectWebSocket() {
         }
         else if (mtype === 'chat_message') {
             addChatBubble(data.username, data.message);
+            speechBubbles.set(data.player_id, {
+                text: data.message,
+                expires: Date.now() + 4000
+            });
         }
         else if (mtype === 'hazard_list') {
             hazardZones = data.hazards || [];
@@ -741,6 +865,11 @@ function connectWebSocket() {
         }
         else if (mtype === 'crystal_collected') {
             addChatBubble('System', `${data.username} collected ${Number(data.value).toFixed(2)} CR`);
+            const px = (data.player_id === selfPlayerId) ? selfX : (playersMap.get(data.player_id)?.x);
+            const py = (data.player_id === selfPlayerId) ? selfY : (playersMap.get(data.player_id)?.y);
+            if (px !== undefined && py !== undefined) {
+                createCrystalExplosion(px, py);
+            }
             if (data.player_id === selfPlayerId) {
                 fetchQuests();
                 fetchLobbyData();
@@ -768,6 +897,12 @@ function connectWebSocket() {
         else if (mtype === 'snap_back') {
             selfX = data.x;
             selfY = data.y;
+        }
+        else if (mtype === 'tombstone_list') {
+            tombstones = data.tombstones || [];
+        }
+        else if (mtype === 'death_trap_list') {
+            deathTraps = data.traps || [];
         }
         else if (mtype === 'kicked') {
             wsConn.close();
@@ -892,6 +1027,8 @@ function handleJoystickMove(touch) {
 // ─── DETERMINISTIC OBSTACLES ───
 function generateObstacles() {
     obstacleList = [];
+    treeList = [];
+    bushList = [];
     districtZones = [
         { x: 700, y: 820, w: 760, h: 420, type: 'ruins', label: 'RUINS' },
         { x: 2450, y: 520, w: 880, h: 520, type: 'signal', label: 'SIGNAL FIELD' },
@@ -914,6 +1051,43 @@ function generateObstacles() {
         const dist = Math.hypot(ox - cx, oy - cy);
         if (dist > 280 && !isInsideSpawnLane(ox, oy)) {
             obstacleList.push({ x: ox, y: oy, rad, type, rot: seedC * Math.PI });
+        }
+    }
+
+    // Deterministic Trees
+    for (let i = 0; i < 35; i++) {
+        const seedA = fract(Math.sin(i * 153.29 + 11.4) * 54321.9876);
+        const seedB = fract(Math.sin(i * 245.81 + 7.3) * 65432.1234);
+        const seedC = fract(Math.sin(i * 512.43 + 3.1) * 76543.5432);
+        
+        const tx = 200 + seedA * (WORLD_WIDTH - 400);
+        const ty = 200 + seedB * (WORLD_HEIGHT - 400);
+        const trunkRad = 8 + seedC * 4;
+        const canopyRad = 26 + seedC * 14;
+
+        const cx = WORLD_WIDTH / 2;
+        const cy = WORLD_HEIGHT / 2;
+        const dist = Math.hypot(tx - cx, ty - cy);
+        if (dist > 300 && !isInsideSpawnLane(tx, ty)) {
+            treeList.push({ x: tx, y: ty, trunkRad, canopyRad });
+        }
+    }
+
+    // Deterministic Bushes
+    for (let i = 0; i < 30; i++) {
+        const seedA = fract(Math.sin(i * 197.63 + 15.2) * 87654.321);
+        const seedB = fract(Math.sin(i * 322.19 + 2.8) * 98765.432);
+        const seedC = fract(Math.sin(i * 611.87 + 9.4) * 12345.678);
+        
+        const bx = 200 + seedA * (WORLD_WIDTH - 400);
+        const by = 200 + seedB * (WORLD_HEIGHT - 400);
+        const rad = 18 + seedC * 12;
+
+        const cx = WORLD_WIDTH / 2;
+        const cy = WORLD_HEIGHT / 2;
+        const dist = Math.hypot(bx - cx, by - cy);
+        if (dist > 300 && !isInsideSpawnLane(bx, by)) {
+            bushList.push({ x: bx, y: by, rad });
         }
     }
 }
@@ -990,6 +1164,17 @@ function update(dt) {
                 }
             }
 
+            // Collision with trees
+            for (let tree of treeList) {
+                const dist = Math.hypot(selfX - tree.x, selfY - tree.y);
+                if (dist < tree.trunkRad + PLAYER_RADIUS) {
+                    const overlap = (tree.trunkRad + PLAYER_RADIUS) - dist;
+                    const safeDist = dist || 1;
+                    selfX += ((selfX - tree.x) / safeDist) * overlap;
+                    selfY += ((selfY - tree.y) / safeDist) * overlap;
+                }
+            }
+
             // Spawn Particles
             if (particles.length < 200 && Math.random() < 0.25) {
                 particles.push(generateParticle(selfX, selfY, COLORS.GRAY, 0.5));
@@ -1053,6 +1238,26 @@ function update(dt) {
     }
     updateNearestGoalHUD();
     updateQuestHUD();
+
+    // Speech bubbles pruning
+    const nowMs = Date.now();
+    for (let [id, bubble] of speechBubbles.entries()) {
+        if (nowMs > bubble.expires) {
+            speechBubbles.delete(id);
+        }
+    }
+
+    // NPC talk logic
+    NPCS.forEach(npc => {
+        if (nowMs - npc.lastTalk > npc.talkCooldown) {
+            const phrase = npc.phrases[Math.floor(Math.random() * npc.phrases.length)];
+            speechBubbles.set(npc.id, {
+                text: phrase,
+                expires: nowMs + 4000
+            });
+            npc.lastTalk = nowMs + Math.random() * 4000;
+        }
+    });
 }
 
 function draw() {
@@ -1083,6 +1288,15 @@ function draw() {
     // 4. Draw world routes
     drawWorldRoutes(offsetX, offsetY);
 
+    // 4.1. Draw Bushes
+    drawBushes(offsetX, offsetY);
+
+    // 4.2. Draw Tree Trunks
+    drawTreeTrunks(offsetX, offsetY);
+
+    // 4.3. Draw Death Traps
+    drawDeathTraps(offsetX, offsetY);
+
     // 5. Draw map props
     for (let obs of obstacleList) {
         drawMapProp(obs, offsetX, offsetY);
@@ -1098,34 +1312,57 @@ function draw() {
     // 8. Draw temporary hazard zones
     drawHazards(offsetX, offsetY);
 
-    // 9. Draw Other Players
+    // 9. Draw Persistent Tombstones
+    tombstones.forEach(t => {
+        drawTombstone(t.x + offsetX, t.y + offsetY, t.username);
+    });
+
+    // 9.5. Draw NPC Characters
+    drawNPCs(offsetX, offsetY);
+
+    // 10. Draw Other Players
     playersMap.forEach(p => {
         if (p.is_alive) {
+            const inBush = isPlayerInBush(p.x, p.y);
+            if (inBush) ctx.globalAlpha = 0.35;
             drawCyberAvatar(p.x + offsetX, p.y + offsetY, COLORS.GRAY, false, p.username);
-        } else {
-            drawTombstone(p.x + offsetX, p.y + offsetY);
+            ctx.globalAlpha = 1.0;
         }
     });
 
-    // 10. Draw Self
+    // 11. Draw Self
     const selfAlive = deathOverlay.classList.contains('hidden');
     if (selfAlive) {
+        const inBush = isPlayerInBush(selfX, selfY);
+        if (inBush) ctx.globalAlpha = 0.35;
         drawCyberAvatar(selfX + offsetX, selfY + offsetY, COLORS.WHITE, true, username);
-    } else {
-        drawTombstone(selfX + offsetX, selfY + offsetY);
+        ctx.globalAlpha = 1.0;
     }
 
-    // 11. Draw current objective direction
+    // 11.5. Draw Player & NPC Speech Bubbles
+    playersMap.forEach(p => {
+        if (p.is_alive) {
+            drawPlayerSpeechBubble(p.id, p.x + offsetX, p.y + offsetY);
+        }
+    });
+    if (selfAlive) {
+        drawPlayerSpeechBubble(selfPlayerId, selfX + offsetX, selfY + offsetY);
+    }
+
+    // 11.6. Draw Tree Canopies (above players)
+    drawTreeCanopies(offsetX, offsetY);
+
+    // 12. Draw current objective direction
     if (selfAlive) {
         drawGoalPointer(offsetX, offsetY);
     }
 
-    // 12. Draw Boss AI Void Creature
+    // 13. Draw Boss AI Void Creature
     if (bossState.state !== 'sleeping') {
         drawBoss(bossState.x + offsetX, bossState.y + offsetY);
     }
 
-    // 13. Draw Minimap Overlay
+    // 14. Draw Minimap Overlay
     drawMinimap();
 }
 
@@ -1453,21 +1690,242 @@ function drawCyberAvatar(x, y, baseColor, isSelf, uname) {
     }
 }
 
-function drawTombstone(x, y) {
-    ctx.fillStyle = COLORS.GRAY;
-    ctx.fillRect(x - 9, y - 12, 18, 24);
-    // rounded top
-    ctx.beginPath();
-    ctx.arc(x, y - 12, 9, 0, Math.PI, true);
+function drawTombstone(x, y, uname) {
+    ctx.save();
+    ctx.fillStyle = '#444';
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1.5;
+    
+    // Прямокутник могилки
+    drawRoundRect(x - 9, y - 12, 18, 24, 4);
     ctx.fill();
+    ctx.stroke();
 
-    // RIP Cross
-    ctx.strokeStyle = COLORS.DARK_GRAY;
+    // RIP Хрестик
+    ctx.strokeStyle = '#222';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x, y - 16); ctx.lineTo(x, y - 4);
     ctx.moveTo(x - 5, y - 12); ctx.lineTo(x + 5, y - 12);
     ctx.stroke();
+    
+    // Текст RIP або ім'я
+    if (uname) {
+        ctx.fillStyle = '#888';
+        ctx.font = '500 8px Inter';
+        ctx.textAlign = 'center';
+        const displayName = uname.length > 8 ? uname.substring(0, 6) + '..' : uname;
+        ctx.fillText(displayName, x, y + 20);
+    }
+    ctx.restore();
+}
+
+function drawBushes(ox, oy) {
+    ctx.save();
+    bushList.forEach(bush => {
+        const x = bush.x + ox;
+        const y = bush.y + oy;
+        const r = bush.rad;
+
+        ctx.fillStyle = 'rgba(0, 153, 51, 0.4)';
+        ctx.strokeStyle = 'rgba(0, 204, 68, 0.6)';
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(x - r * 0.3, y - r * 0.2, r * 0.6, 0, Math.PI * 2);
+        ctx.arc(x + r * 0.4, y + r * 0.1, r * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    });
+    ctx.restore();
+}
+
+function drawTreeTrunks(ox, oy) {
+    ctx.save();
+    treeList.forEach(tree => {
+        const x = tree.x + ox;
+        const y = tree.y + oy;
+        
+        ctx.fillStyle = '#4d2600';
+        ctx.strokeStyle = '#261300';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, tree.trunkRad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    });
+    ctx.restore();
+}
+
+function drawTreeCanopies(ox, oy) {
+    const t = Date.now() / 1000;
+    ctx.save();
+    treeList.forEach((tree, idx) => {
+        const x = tree.x + ox;
+        const y = tree.y + oy;
+        const wind = Math.sin(t * 1.5 + idx) * 2;
+        const r = tree.canopyRad;
+
+        const grad = ctx.createRadialGradient(x + wind, y - r*0.1 + wind, r*0.2, x + wind, y + wind, r);
+        grad.addColorStop(0, '#00b33c');
+        grad.addColorStop(0.8, '#00802b');
+        grad.addColorStop(1, '#004d1a');
+
+        ctx.fillStyle = grad;
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 5;
+        ctx.shadowOffsetY = 10;
+
+        ctx.beginPath();
+        ctx.arc(x + wind, y + wind, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+    ctx.restore();
+}
+
+function drawDeathTraps(ox, oy) {
+    const t = Date.now() / 1000;
+    deathTraps.forEach(trap => {
+        const x = trap.x + ox;
+        const y = trap.y + oy;
+        const r = trap.radius;
+
+        ctx.save();
+        if (trap.type === 'pit') {
+            const grad = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+            grad.addColorStop(0, '#000000');
+            grad.addColorStop(0.7, '#070707');
+            grad.addColorStop(1, '#ff5500');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(255, 85, 0, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(255, 85, 0, 0.4)';
+            ctx.font = '900 8px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('DANGER: PIT', x, y - r - 6);
+        } else if (trap.type === 'cave') {
+            const grad = ctx.createRadialGradient(x, y, r * 0.1, x, y, r);
+            grad.addColorStop(0, '#020005');
+            grad.addColorStop(0.8, '#0b001a');
+            grad.addColorStop(1, '#aa00ff');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(170, 0, 255, 0.7)';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            const pulse = (t * 0.5) % 1.0;
+            ctx.strokeStyle = `rgba(170, 0, 255, ${0.4 * (1 - pulse)})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(x, y, r * pulse, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(170, 0, 255, 0.5)';
+            ctx.font = '900 8px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('LETHAL CAVE', x, y - r - 6);
+        }
+        ctx.restore();
+    });
+}
+
+function drawNPCs(ox, oy) {
+    NPCS.forEach(npc => {
+        const inBush = isPlayerInBush(npc.x, npc.y);
+        if (inBush) ctx.globalAlpha = 0.35;
+        drawCyberAvatar(npc.x + ox, npc.y + oy, '#555', false, `[NPC] ${npc.name}`);
+        ctx.globalAlpha = 1.0;
+        drawPlayerSpeechBubble(npc.id, npc.x + ox, npc.y + oy);
+    });
+}
+
+function drawPlayerSpeechBubble(playerId, px, py) {
+    const bubble = speechBubbles.get(playerId);
+    if (!bubble) return;
+
+    ctx.save();
+    ctx.font = '500 10px Inter';
+    const maxBubbleWidth = 140;
+    const lines = wrapText(ctx, bubble.text, maxBubbleWidth);
+    
+    let bubbleWidth = 0;
+    lines.forEach(line => {
+        const w = ctx.measureText(line).width;
+        if (w > bubbleWidth) bubbleWidth = w;
+    });
+    bubbleWidth = Math.max(40, bubbleWidth + 16);
+    const lineHeight = 13;
+    const bubbleHeight = lines.length * lineHeight + 10;
+
+    const bx = px - bubbleWidth / 2;
+    const by = py - 38 - bubbleHeight;
+
+    ctx.fillStyle = 'rgba(12, 12, 12, 0.92)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1;
+    drawRoundRect(bx, by, bubbleWidth, bubbleHeight, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(12, 12, 12, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(px - 5, by + bubbleHeight);
+    ctx.lineTo(px, by + bubbleHeight + 5);
+    ctx.lineTo(px + 5, by + bubbleHeight);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.moveTo(px - 5, by + bubbleHeight);
+    ctx.lineTo(px, by + bubbleHeight + 5);
+    ctx.lineTo(px + 5, by + bubbleHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    lines.forEach((line, idx) => {
+        ctx.fillText(line, px, by + 12 + idx * lineHeight);
+    });
+
+    ctx.restore();
+}
+
+function isPlayerInBush(px, py) {
+    for (let bush of bushList) {
+        const dist = Math.hypot(px - bush.x, py - bush.y);
+        if (dist < bush.rad) return true;
+    }
+    return false;
+}
+
+function createCrystalExplosion(x, y) {
+    for (let i = 0; i < 20; i++) {
+        particles.push(generateParticle(x, y, COLORS.YELLOW, 1.8));
+    }
 }
 
 // ─── MENACING BOSS VOID CREATURE DRAWING ───

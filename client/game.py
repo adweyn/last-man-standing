@@ -49,6 +49,10 @@ class GameplayScreen:
         self.crystals: List[Dict[str, Any]] = []
         self.hazards: List[Dict[str, Any]] = []
         self.objectives: List[Dict[str, Any]] = []
+        self.death_traps: List[Dict[str, Any]] = []
+        self.death_markers: List[Dict[str, Any]] = []
+        self.speech_bubbles: List[Dict[str, Any]] = []
+        self.npcs: List[Dict[str, Any]] = []
 
         # Subsystems
         self.hud = HUD()
@@ -70,6 +74,8 @@ class GameplayScreen:
         self.move_speed = 160.0  # px/s
         self.last_network_update = 0.0
         self.net_update_rate = 1.0 / 30.0  # 30 Hz position update rate
+        self.last_attack_time = 0.0
+        self.attack_cooldown = 0.9
 
         # Play status: "playing" | "game_over" | "victory"
         self.status = "playing"
@@ -112,6 +118,36 @@ class GameplayScreen:
             if ((ox - cx)**2 + (oy - cy)**2) ** 0.5 > 200:
                 self.obstacles.append((ox, oy, rad))
 
+        # Generate Trees deterministically
+        self.trees = []
+        random.seed(self.tier_id * 200)
+        for _ in range(35):
+            tx = random.uniform(200, WORLD_WIDTH - 200)
+            ty = random.uniform(200, WORLD_HEIGHT - 200)
+            trunk_rad = random.uniform(8, 12)
+            canopy_rad = random.uniform(26, 40)
+            cx, cy = WORLD_WIDTH // 2, WORLD_HEIGHT // 2
+            if ((tx - cx)**2 + (ty - cy)**2) ** 0.5 > 300:
+                self.trees.append({"x": tx, "y": ty, "trunk_rad": trunk_rad, "canopy_rad": canopy_rad})
+
+        # Generate Bushes deterministically
+        self.bushes = []
+        random.seed(self.tier_id * 300)
+        for _ in range(30):
+            bx = random.uniform(200, WORLD_WIDTH - 200)
+            by = random.uniform(200, WORLD_HEIGHT - 200)
+            rad = random.uniform(18, 30)
+            cx, cy = WORLD_WIDTH // 2, WORLD_HEIGHT // 2
+            if ((bx - cx)**2 + (by - cy)**2) ** 0.5 > 300:
+                self.bushes.append({"x": bx, "y": by, "rad": rad})
+
+        self.npcs = [
+            {"x": 890.0, "y": 1030.0, "name": "Mara", "lines": ["Do not trust quiet tunnels.", "CR shines brightest near danger."]},
+            {"x": 2850.0, "y": 760.0, "name": "Relay-7", "lines": ["Signal weak. Hunters close.", "Run when the sky blinks red."]},
+            {"x": 1050.0, "y": 2840.0, "name": "Gravekeeper", "lines": ["Every marker was a player.", "Survive first. Loot second."]},
+            {"x": 2880.0, "y": 2920.0, "name": "Cache Broker", "lines": ["Vaults pay. Vaults bite.", "Bring friends, leave rivals."]},
+        ]
+
     def _register_network_callbacks(self):
         self.network.register_callback("welcome", self._on_welcome)
         self.network.register_callback("player_list", self._on_player_list)
@@ -128,6 +164,11 @@ class GameplayScreen:
         self.network.register_callback("objective_list", self._on_objective_list)
         self.network.register_callback("crystal_collected", self._on_crystal_collected)
         self.network.register_callback("objective_completed", self._on_objective_completed)
+        self.network.register_callback("death_trap_list", self._on_death_trap_list)
+        self.network.register_callback("combat_hit", self._on_combat_hit)
+        self.network.register_callback("attack_missed", self._on_attack_missed)
+        self.network.register_callback("pvp_reward", self._on_pvp_reward)
+        self.network.register_callback("tombstone_list", self._on_tombstone_list)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Socket Event Receivers
@@ -167,7 +208,10 @@ class GameplayScreen:
                 self.chat.add_message("ALERT", "THE HUNT IS ON!")
 
     def _on_chat_message(self, data):
-        self.chat.add_message(data.get("username", "Anon"), data.get("message", ""))
+        name = data.get("username", "Anon")
+        message = data.get("message", "")
+        self.chat.add_message(name, message)
+        self._add_speech_bubble(data.get("player_id"), name, message, data.get("x"), data.get("y"))
 
     def _on_player_eliminated(self, data):
         username = data.get("username", "Someone")
@@ -177,9 +221,23 @@ class GameplayScreen:
         
         # Add red explosion particles at their death coordinates
         pid = data.get("player_id")
+        px = data.get("x")
+        py = data.get("y")
         if pid in self.players:
             px = self.players[pid]["x"]
             py = self.players[pid]["y"]
+            self.players[pid]["is_alive"] = False
+        elif pid == self.self_player_id:
+            px = self.self_x
+            py = self.self_y
+        if px is not None and py is not None:
+            self.death_markers.append({
+                "x": float(px),
+                "y": float(py),
+                "username": username,
+                "reason": reason,
+                "created_at": time.time(),
+            })
             for _ in range(15):
                 self.particles.append(generate_particle(px, py, COLORS["RED"], speed=2.5))
 
@@ -219,12 +277,80 @@ class GameplayScreen:
         username = data.get("username", "Someone")
         value = float(data.get("value", 0.0) or 0.0)
         self.chat.add_message("System", f"{username} collected {value:.2f} CR")
+        
+        pid = data.get("player_id")
+        px, py = None, None
+        if pid == self.self_player_id:
+            px, py = self.self_x, self.self_y
+        elif pid in self.players:
+            px, py = self.players[pid]["x"], self.players[pid]["y"]
+            
+        if px is not None and py is not None:
+            for _ in range(15):
+                self.particles.append(generate_particle(px, py, COLORS["YELLOW"], speed=1.8))
 
     def _on_objective_completed(self, data):
         username = data.get("username", "Someone")
         reward = float(data.get("reward", 0.0) or 0.0)
         obj = self._format_objective(data.get("objective_type", "objective"))
         self.chat.add_message("System", f"{username} completed {obj} +{reward:.2f} CR")
+
+    def _on_death_trap_list(self, data):
+        self.death_traps = data.get("traps", [])
+
+    def _on_tombstone_list(self, data):
+        raw_tombstones = data.get("tombstones", [])
+        self.death_markers = []
+        for rt in raw_tombstones:
+            self.death_markers.append({
+                "x": float(rt.get("x", 2000.0)),
+                "y": float(rt.get("y", 2000.0)),
+                "username": rt.get("username", "Someone"),
+                "reason": rt.get("reason", "unknown"),
+            })
+
+    def _on_combat_hit(self, data):
+        attacker = data.get("attacker_username", "Someone")
+        target = data.get("target_username", "someone")
+        hp = int(data.get("target_hp", 0) or 0)
+        max_hp = int(data.get("max_hp", 3) or 3)
+        self.chat.add_message("Combat", f"{attacker} hit {target} ({hp}/{max_hp} HP)")
+
+        tid = data.get("target_id")
+        if tid in self.players:
+            self.players[tid]["hp"] = hp
+            self.players[tid]["max_hp"] = max_hp
+        px = float(data.get("x", self.self_x) or self.self_x)
+        py = float(data.get("y", self.self_y) or self.self_y)
+        self.shake_remaining_frames = max(self.shake_remaining_frames, 4)
+        for _ in range(9):
+            self.particles.append(generate_particle(px, py, COLORS["RED"], speed=1.8))
+
+    def _on_attack_missed(self, data):
+        self.chat.add_message("Combat", "No target in range.")
+
+    def _on_pvp_reward(self, data):
+        value = float(data.get("value", 0.0) or 0.0)
+        self.chat.add_message("System", f"{data.get('username', 'Someone')} earned {value:.2f} CR for a takedown")
+
+    def _add_speech_bubble(self, player_id, name: str, text: str, x=None, y=None):
+        if player_id in self.players:
+            x = self.players[player_id]["x"]
+            y = self.players[player_id]["y"]
+        elif player_id == self.self_player_id:
+            x = self.self_x
+            y = self.self_y
+        if x is None or y is None:
+            return
+        self.speech_bubbles.append({
+            "player_id": player_id,
+            "name": name,
+            "text": str(text)[:70],
+            "x": float(x),
+            "y": float(y),
+            "created_at": time.time(),
+            "ttl": 4.0,
+        })
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Updates & inputs
@@ -253,8 +379,23 @@ class GameplayScreen:
             if event.key == pygame.K_ESCAPE:
                 self.network.disconnect()
                 return True
+            if event.key == pygame.K_SPACE and not self.chat.typing:
+                self._try_attack()
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.chat.typing:
+            self._try_attack()
 
         return False
+
+    def _try_attack(self):
+        now = time.time()
+        if now - self.last_attack_time < self.attack_cooldown:
+            return
+        self.last_attack_time = now
+        self.network.send_attack()
+        self.chat.add_message("Combat", "Attack")
+        for _ in range(5):
+            self.particles.append(generate_particle(self.self_x, self.self_y, COLORS["WHITE"], speed=1.4))
 
     def update(self, dt: float):
         if self.status != "playing":
@@ -304,6 +445,18 @@ class GameplayScreen:
                     self.self_x += dx * overlap
                     self.self_y += dy * overlap
 
+            # Collision with trees
+            for tree in self.trees:
+                tx, ty, trad = tree["x"], tree["y"], tree["trunk_rad"]
+                p_dist = ((self.self_x - tx)**2 + (self.self_y - ty)**2) ** 0.5
+                if p_dist < trad + PLAYER_RADIUS:
+                    overlap = (trad + PLAYER_RADIUS) - p_dist
+                    safe_dist = p_dist or 1.0
+                    dx = (self.self_x - tx) / safe_dist
+                    dy = (self.self_y - ty) / safe_dist
+                    self.self_x += dx * overlap
+                    self.self_y += dy * overlap
+
             # Spawn trail particles when moving
             if len(self.particles) < PARTICLE_POOL_MAX and random.random() < 0.3:
                 self.particles.append(generate_particle(self.self_x, self.self_y, COLORS["GRAY"], speed=0.4))
@@ -331,6 +484,19 @@ class GameplayScreen:
 
         # Update all particles
         self.particles = update_particles(self.particles, dt)
+        now = time.time()
+        self.speech_bubbles = [
+            b for b in self.speech_bubbles
+            if now - b.get("created_at", now) < b.get("ttl", 4.0)
+        ]
+        for bubble in self.speech_bubbles:
+            pid = bubble.get("player_id")
+            if pid in self.players:
+                bubble["x"] = self.players[pid]["x"]
+                bubble["y"] = self.players[pid]["y"]
+            elif pid == self.self_player_id:
+                bubble["x"] = self.self_x
+                bubble["y"] = self.self_y
 
         # Smooth camera following
         # target camera is self coordinates
@@ -338,7 +504,6 @@ class GameplayScreen:
         self.camera_y += (self.self_y - self.camera_y) * CAMERA_SPEED * dt
 
         # Periodic non-blocking REST fetch for HUD data (every 5 seconds)
-        now = time.time()
         if now - self._last_hud_fetch > self._hud_fetch_interval:
             self._last_hud_fetch = now
             def _fetch_hud():
@@ -400,6 +565,10 @@ class GameplayScreen:
         for idx, (ox, oy, orad) in enumerate(self.obstacles):
             self._draw_map_prop(idx, ox + offset_x, oy + offset_y, orad)
 
+        # Draw bushes and tree trunks below players
+        self._draw_bushes(offset_x, offset_y)
+        self._draw_tree_trunks(offset_x, offset_y)
+
         # Render boundary walls
         bx_min = int(offset_x)
         bx_max = int(WORLD_WIDTH + offset_x)
@@ -419,34 +588,84 @@ class GameplayScreen:
 
         self._draw_crystals(offset_x, offset_y)
         self._draw_objectives(offset_x, offset_y)
+        self._draw_death_traps(offset_x, offset_y)
+        self._draw_death_markers(offset_x, offset_y)
+        self._draw_npcs(offset_x, offset_y)
         self._draw_hazards(offset_x, offset_y)
 
         # Draw other players
         for pid, p in self.players.items():
             if pid == self.self_player_id:
                 continue
-            draw_player(
-                self.screen,
-                p["x"] + offset_x,
-                p["y"] + offset_y,
-                COLORS["GRAY"],
-                is_self=False,
-                username=p["username"],
-                is_alive=p.get("is_alive", True),
-                font=self.medium_font
-            )
+            is_alive = p.get("is_alive", True)
+            if is_alive and self._is_in_bush(p["x"], p["y"]):
+                # Draw on a temporary transparent surface for stealth blending
+                temp_surf = pygame.Surface((120, 120), pygame.SRCALPHA)
+                draw_player(
+                    temp_surf,
+                    60,
+                    60,
+                    COLORS["GRAY"],
+                    is_self=False,
+                    username=p["username"],
+                    is_alive=is_alive,
+                    font=self.medium_font
+                )
+                self._draw_hp_bar(60, 60 + 24, p.get("hp", 3), p.get("max_hp", 3), temp_surf)
+                temp_surf.set_alpha(100)
+                self.screen.blit(temp_surf, (int(p["x"] + offset_x - 60), int(p["y"] + offset_y - 60)))
+            else:
+                draw_player(
+                    self.screen,
+                    p["x"] + offset_x,
+                    p["y"] + offset_y,
+                    COLORS["GRAY"],
+                    is_self=False,
+                    username=p["username"],
+                    is_alive=is_alive,
+                    font=self.medium_font
+                )
+                if is_alive:
+                    self._draw_hp_bar(p["x"] + offset_x, p["y"] + offset_y + 24, p.get("hp", 3), p.get("max_hp", 3))
 
         # Draw self player
-        draw_player(
-            self.screen,
-            self.self_x + offset_x,
-            self.self_y + offset_y,
-            COLORS["WHITE"],
-            is_self=True,
-            username=self.network.username,
-            is_alive=(self.status != "game_over"),
-            font=self.medium_font
-        )
+        is_self_alive = (self.status != "game_over")
+        if is_self_alive and self._is_in_bush(self.self_x, self.self_y):
+            # Draw self transparently in bush
+            temp_surf = pygame.Surface((120, 120), pygame.SRCALPHA)
+            draw_player(
+                temp_surf,
+                60,
+                60,
+                COLORS["WHITE"],
+                is_self=True,
+                username=self.network.username,
+                is_alive=is_self_alive,
+                font=self.medium_font
+            )
+            me = self.players.get(self.self_player_id, {})
+            self._draw_hp_bar(60, 60 + 24, me.get("hp", 3), me.get("max_hp", 3), temp_surf)
+            temp_surf.set_alpha(100)
+            self.screen.blit(temp_surf, (int(self.self_x + offset_x - 60), int(self.self_y + offset_y - 60)))
+        else:
+            draw_player(
+                self.screen,
+                self.self_x + offset_x,
+                self.self_y + offset_y,
+                COLORS["WHITE"],
+                is_self=True,
+                username=self.network.username,
+                is_alive=is_self_alive,
+                font=self.medium_font
+            )
+            if self.status == "playing":
+                me = self.players.get(self.self_player_id, {})
+                self._draw_hp_bar(self.self_x + offset_x, self.self_y + offset_y + 24, me.get("hp", 3), me.get("max_hp", 3))
+
+        # Draw tree canopies above players
+        self._draw_tree_canopies(offset_x, offset_y)
+
+        self._draw_speech_bubbles(offset_x, offset_y)
 
         self._draw_goal_pointer(offset_x, offset_y)
 
@@ -529,21 +748,143 @@ class GameplayScreen:
         kind = idx % 4
         ix, iy, ir = int(x), int(y), int(r)
         if kind == 0:
-            points = [(ix, iy - ir), (ix + ir // 2, iy + ir), (ix - ir // 2, iy + ir)]
-            pygame.draw.polygon(self.screen, COLORS["DARK_GRAY"], points)
-            pygame.draw.polygon(self.screen, COLORS["GRAY"], points, 2)
-            pygame.draw.line(self.screen, COLORS["GREEN"], (ix, iy - ir // 2), (ix, iy + ir // 2), 1)
+            pygame.draw.line(self.screen, COLORS["DARK_GRAY"], (ix, iy + ir), (ix, iy - ir), max(3, ir // 4))
+            pygame.draw.circle(self.screen, COLORS["DARK_GRAY"], (ix - ir // 2, iy - ir), max(8, ir // 2))
+            pygame.draw.circle(self.screen, COLORS["GRAY"], (ix + ir // 3, iy - ir - 4), max(7, ir // 2))
+            pygame.draw.circle(self.screen, COLORS["GREEN"], (ix, iy - ir), 2)
         elif kind == 1:
             rect = pygame.Rect(ix - ir, iy - ir // 2, ir * 2, ir)
             pygame.draw.rect(self.screen, COLORS["DARK_GRAY"], rect, border_radius=2)
             pygame.draw.rect(self.screen, COLORS["GRAY"], rect, 1, border_radius=2)
         elif kind == 2:
-            pygame.draw.line(self.screen, COLORS["RED"], (ix - ir, iy - ir), (ix - ir // 3, iy), 3)
-            pygame.draw.line(self.screen, COLORS["RED"], (ix - ir // 3, iy), (ix + ir, iy + ir), 3)
-            pygame.draw.rect(self.screen, COLORS["PANEL_BORDER"], (ix - ir, iy - ir, ir * 2, ir * 2), 1)
+            pygame.draw.ellipse(self.screen, COLORS["BLACK"], (ix - ir, iy - ir // 2, ir * 2, ir), 0)
+            pygame.draw.ellipse(self.screen, COLORS["RED"], (ix - ir, iy - ir // 2, ir * 2, ir), 2)
+            pygame.draw.line(self.screen, COLORS["GRAY"], (ix - ir // 2, iy), (ix + ir // 2, iy), 1)
         else:
             pygame.draw.circle(self.screen, COLORS["YELLOW"], (ix, iy), max(4, ir // 2), 2)
             pygame.draw.circle(self.screen, COLORS["WHITE"], (ix, iy), 2)
+
+    def _draw_hp_bar(self, x: float, y: float, hp: int, max_hp: int, surface=None):
+        if surface is None:
+            surface = self.screen
+        max_hp = max(1, int(max_hp or 1))
+        hp = max(0, min(max_hp, int(hp or 0)))
+        width, height = 32, 4
+        rect = pygame.Rect(int(x - width / 2), int(y), width, height)
+        pygame.draw.rect(surface, COLORS["DARK_GRAY"], rect)
+        fill = pygame.Rect(rect.x, rect.y, int(width * hp / max_hp), height)
+        pygame.draw.rect(surface, COLORS["GREEN"] if hp > 1 else COLORS["RED"], fill)
+
+    def _draw_death_traps(self, offset_x: float, offset_y: float):
+        t = time.time()
+        for trap in self.death_traps:
+            x = int(float(trap.get("x", 0)) + offset_x)
+            y = int(float(trap.get("y", 0)) + offset_y)
+            radius = int(float(trap.get("radius", 44)))
+            ttype = trap.get("type", "pit")
+            
+            if ttype == "cave":
+                pygame.draw.circle(self.screen, (10, 0, 20), (x, y), radius)
+                pygame.draw.circle(self.screen, (170, 0, 255), (x, y), radius, 2)
+                pulse = int(radius * (0.3 + 0.5 * ((t * 0.5) % 1.0)))
+                pygame.draw.circle(self.screen, (170, 0, 255), (x, y), pulse, 1)
+                label = self.small_font.render("LETHAL CAVE", True, (170, 0, 255))
+            else:
+                pygame.draw.circle(self.screen, COLORS["BLACK"], (x, y), radius)
+                pygame.draw.circle(self.screen, (255, 85, 0), (x, y), radius, 2)
+                label = self.small_font.render("LETHAL PIT", True, (255, 85, 0))
+                
+            self.screen.blit(label, (x - label.get_width() // 2, y - radius - 14))
+
+    def _draw_bushes(self, offset_x: float, offset_y: float):
+        for bush in self.bushes:
+            x = int(bush["x"] + offset_x)
+            y = int(bush["y"] + offset_y)
+            r = int(bush["rad"])
+            
+            surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (0, 153, 51, 95), (r, r), r)
+            pygame.draw.circle(surf, (0, 204, 68, 140), (r, r), r, 2)
+            
+            pygame.draw.circle(surf, (0, 153, 51, 95), (int(r * 0.7), int(r * 0.8)), int(r * 0.6))
+            pygame.draw.circle(surf, (0, 153, 51, 95), (int(r * 1.3), int(r * 1.1)), int(r * 0.5))
+            
+            self.screen.blit(surf, (x - r, y - r))
+
+    def _draw_tree_trunks(self, offset_x: float, offset_y: float):
+        for tree in self.trees:
+            x = int(tree["x"] + offset_x)
+            y = int(tree["y"] + offset_y)
+            r = int(tree["trunk_rad"])
+            pygame.draw.circle(self.screen, (77, 38, 0), (x, y), r)
+            pygame.draw.circle(self.screen, (38, 19, 0), (x, y), r, 1)
+
+    def _draw_tree_canopies(self, offset_x: float, offset_y: float):
+        t = time.time()
+        for idx, tree in enumerate(self.trees):
+            x = int(tree["x"] + offset_x)
+            y = int(tree["y"] + offset_y)
+            r = int(tree["canopy_rad"])
+            wind = int(2.0 * math.sin(t * 1.5 + idx))
+            cx = x + wind
+            cy = y + wind
+            
+            surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (0, 128, 43, 200), (r, r), r)
+            pygame.draw.circle(surf, (0, 179, 60, 220), (r, r), int(r * 0.8))
+            pygame.draw.circle(surf, (0, 77, 26, 220), (r, r), r, 2)
+            
+            self.screen.blit(surf, (cx - r, cy - r))
+
+    def _is_in_bush(self, px: float, py: float) -> bool:
+        for bush in self.bushes:
+            bx, by, brad = bush["x"], bush["y"], bush["rad"]
+            if ((px - bx)**2 + (py - by)**2) ** 0.5 < brad:
+                return True
+        return False
+
+    def _draw_death_markers(self, offset_x: float, offset_y: float):
+        for marker in self.death_markers[-40:]:
+            x = int(float(marker.get("x", 0)) + offset_x)
+            y = int(float(marker.get("y", 0)) + offset_y)
+            pygame.draw.rect(self.screen, COLORS["GRAY"], (x - 9, y - 15, 18, 25), border_radius=4)
+            pygame.draw.line(self.screen, COLORS["DARK_GRAY"], (x, y - 10), (x, y + 4), 2)
+            pygame.draw.line(self.screen, COLORS["DARK_GRAY"], (x - 5, y - 5), (x + 5, y - 5), 2)
+            label = self.small_font.render(marker.get("username", ""), True, COLORS["GRAY"])
+            self.screen.blit(label, (x - label.get_width() // 2, y + 12))
+
+    def _draw_npcs(self, offset_x: float, offset_y: float):
+        now = time.time()
+        for npc in self.npcs:
+            x = int(npc["x"] + offset_x)
+            y = int(npc["y"] + offset_y)
+            pygame.draw.circle(self.screen, COLORS["DARK_GRAY"], (x, y), 13)
+            pygame.draw.circle(self.screen, COLORS["WHITE"], (x, y - 5), 5)
+            pygame.draw.rect(self.screen, COLORS["GRAY"], (x - 6, y, 12, 16), border_radius=3)
+            name = self.small_font.render(npc["name"], True, COLORS["YELLOW"])
+            self.screen.blit(name, (x - name.get_width() // 2, y - 34))
+            line = npc["lines"][int(now / 4) % len(npc["lines"])]
+            self._draw_world_bubble(x, y - 48, line, alpha=190)
+
+    def _draw_speech_bubbles(self, offset_x: float, offset_y: float):
+        now = time.time()
+        for bubble in self.speech_bubbles:
+            age = now - bubble.get("created_at", now)
+            alpha = max(0, min(230, int(230 * (1 - age / bubble.get("ttl", 4.0)))))
+            x = int(float(bubble.get("x", 0)) + offset_x)
+            y = int(float(bubble.get("y", 0)) + offset_y - 48)
+            self._draw_world_bubble(x, y, bubble.get("text", ""), alpha=alpha)
+
+    def _draw_world_bubble(self, x: int, y: int, text: str, alpha: int = 220):
+        text = str(text)[:70]
+        surf_text = self.small_font.render(text, True, COLORS["WHITE"])
+        w = min(260, surf_text.get_width() + 18)
+        h = surf_text.get_height() + 10
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (0, 0, 0, alpha), surf.get_rect(), border_radius=6)
+        pygame.draw.rect(surf, (255, 255, 255, min(120, alpha)), surf.get_rect(), 1, border_radius=6)
+        surf.blit(surf_text, ((w - surf_text.get_width()) // 2, 5))
+        self.screen.blit(surf, (x - w // 2, y - h // 2))
 
     def _draw_crystals(self, offset_x: float, offset_y: float):
         for crystal in self.crystals:
